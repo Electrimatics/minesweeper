@@ -1,1 +1,1 @@
-gcc -g -o minesweeper minesweeper.c -lncurses
+gcc -g -o minesweeper minesweeper.c -lncursesw

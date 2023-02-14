@@ -1,3 +1,4 @@
+#include <curses.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -7,13 +8,39 @@
 #include <limits.h>
 #include <string.h>
 #include <ncurses.h>
+#include <locale.h>
 
-#define ROWWIDTH    5
-#define ROWHEADER   "\b+---+"
-#define ROWDIVIDER  "\b| %d |"
+/* Cell display macros */
+#define CELL_COVERED    1
+#define CELL_SELECTED   2
+#define CELL_FLAGGED    3
+#define CELL_UNCOVERED  4
+#define CELL_CONTAINS_BOMB 5
 
+#define CELL_COVERED_ID "   "
+#define CELL_SELECTED_ID "\u2591\u2591\u2591"
+#define CELL_FLAGGED_ID " \u2691 "
+#define CELL_UNCOVERED_ID " %c "
+#define CELL_CONTAINS_BOMB_ID " \U1F4A3 "
+
+#define PRINT_CELL_WITH_COLOR(color, prints)  attron(COLOR_PAIR(color)); \
+                                              prints; \
+                                              attroff(COLOR_PAIR(color))
+
+// #define CELL_COVERED  "\x1B[47m" _COVERED "\x1B[0m"
+// #define CELL_SELECTED "\x1B[42m" _SELECTED "\x1B[0m"
+// #define CELL_FLAGGED  "\x1B[41m" _FLAGGED "\x1B[0m"
+// #define CELL_UNCOVERED  "\x1B[0m" _UNCOVERED "\x1B[0m"
+
+/* Input capture macru2592os */
+#define ARROW_UP 'A'
+#define ARROW_DOWN 'B'
+#define ARROW_RIGHT 'C'
+#define ARROW_LEFT 'D'
+
+/* Gameboard cell indexing macros */
 // Converts a (row, col) index into a one-dimensional offset
-#define INDEX(row, col, width)          ((row*width)+col)
+#define INDEX(gboard, row, col)          ((row*gboard->width)+col)
 
 // Checks if a cell index is within the bounds of the gameboard
 #define CELL_BOUND_CHECk(gboard, index)  ((index >= 0 && index < gboard->width*gboard->height))
@@ -27,6 +54,7 @@
 // Returns the index if it is in the expected row, -1 otherwise
 #define INDEX_IN_ROW(gboard, index, row) ((CELL_BOUND_CHECk(gboard, index) && ((index) / gboard->width) == (row))? (index) : -1)
 
+/* Gameboard adjacent cell indexing macros */
 // Gets the surronding indexes at the provided index if they exist, -1 otherwise
 #define UP(gboard, index)                (INDEX_IN_ROW(gboard, index-gboard->width, (index/gboard->width)-1))
 #define UPLEFT(gboard, index)            (INDEX_IN_ROW(gboard, index-gboard->width-1, (index/gboard->width)-1))
@@ -37,20 +65,22 @@
 #define RIGHT(gboard, index)             (INDEX_IN_ROW(gboard, index+1, index/gboard->width))
 #define UPRIGHT(gboard, index)           (INDEX_IN_ROW(gboard, index-gboard->width+1, (index/gboard->width)-1))
 
-#define SURRONDING_CELL_STATE(gboard, index, CHECK) (CHECK(CELL(gboard, UP(gboard, index))) << 7 | \
-                                                    CHECK(CELL(gboard, UPLEFT(gboard, index))) << 6 | \
-                                                    CHECK(CELL(gboard, LEFT(gboard, index))) << 5 | \
-                                                    CHECK(CELL(gboard, DOWNLEFT(gboard, index))) << 4 | \
-                                                    CHECK(CELL(gboard, DOWN(gboard, index))) << 3 | \
-                                                    CHECK(CELL(gboard, DOWNRIGHT(gboard, index))) << 2 | \
-                                                    CHECK(CELL(gboard, RIGHT(gboard, index))) << 1 | \
-                                                    CHECK(CELL(gboard, UPRIGHT(gboard, index))))
+// Checks the surronding cells for a provided state
+#define SURRONDING_CELL_STATE(gboard, index, STATE) (STATE(CELL(gboard, UP(gboard, index))) << 7 | \
+                                                    STATE(CELL(gboard, UPLEFT(gboard, index))) << 6 | \
+                                                    STATE(CELL(gboard, LEFT(gboard, index))) << 5 | \
+                                                    STATE(CELL(gboard, DOWNLEFT(gboard, index))) << 4 | \
+                                                    STATE(CELL(gboard, DOWN(gboard, index))) << 3 | \
+                                                    STATE(CELL(gboard, DOWNRIGHT(gboard, index))) << 2 | \
+                                                    STATE(CELL(gboard, RIGHT(gboard, index))) << 1 | \
+                                                    STATE(CELL(gboard, UPRIGHT(gboard, index))))
 /* This is not portable, but it is fast */
 #define COUNT_BITS(result, source)       __asm__ __volatile__ \
                                         ("popcnt %0, %1;" \
                                          : "=r" (result) \
                                          : "r" (source))
 
+/* Cell state query and modification macros */
 #define SET_NUMBOMBS(gboard, index, num) (KNOWN_CELL(gboard, index) |= num)
 #define NUMBOMBS(cell)                  (cell & 0X0F)
 
@@ -60,23 +90,9 @@
 #define SET_UNCOVERED(gboard, index)     (KNOWN_CELL(gboard, index) |= 0x20)
 #define UNCOVERED(cell)                 ((cell & 0x20) >> 5)
 
-#define SET_FLAGGED(gboard, index)       (gKNOWN_CELL(board, index) | 0x40)
+#define SET_FLAGGED(gboard, index)       (KNOWN_CELL(gboard, index) |= 0x40)
+#define SET_UNFLAGGED(gboard, index)    (KNOWN_CELL(gboard, index) &= 0xBF)
 #define FLAGGED(cell)                   ((cell & 0x40) >> 6)
-
-#define DEBUG_PRINT(gboard, INFO) { \
-  char* rowDividerLine = (char*)calloc((ROWWIDTH+2) * gboard->width, sizeof(char)); \
-  for(int i = 0; i < gboard->width; i++) { \
-    strncat(rowDividerLine, ROWHEADER, ROWWIDTH+2); \
-  } \
-  for (int row = 0; row < gboard->height; row++) { \
-    printf("\n%s\n", rowDividerLine); \
-    for (int col = 0; col < gboard->width; col++) { \
-      printf(ROWDIVIDER, INFO(CELL(board, INDEX(row, col, gboard->width)))); \
-    } \
-  } \
-  printf("\n%s\n", rowDividerLine); \
-  free(rowDividerLine); \
-}
 
 // Num is assumed to be a uint8_t
 #define print_bits(num) { \
@@ -91,11 +107,11 @@
 }
 
 /* Bitfields:
-    0-3: Number of surronding bombs
+    0-3: Number of surronding bombs (0-8)
     4: Has bomb
     5: Flagged
     6: Uncovered
-    7: Reserved
+    7: Unused
   */
 typedef struct GameBoard {
   uint8_t* board;
@@ -104,15 +120,28 @@ typedef struct GameBoard {
   int numBombs;
 } GameBoard_T;
 
-typedef enum GameState {BOARD_GENERATION, BOMB_GENERATION, TURNS, EXPLODE, WIN, CLEANUP} GameState_T;
+typedef enum GameState {
+  BOARD_GENERATION, 
+  BOMB_GENERATION, 
+  TURNS, 
+  EXPLODE, 
+  WIN, 
+  CLEANUP
+} GameState_T;
+
+typedef enum CellAction {
+  NONE,
+  UNCOVER,
+  FLAG,
+} CellAction_T;
 
 /* Based on: https://stackoverflow.com/a/12923949 */
 typedef enum {
-    STR2INT_SUCCESS = 0,
-    STR2INT_OVERFLOW,
-    STR2INT_UNDERFLOW,
-    STR2INT_INCONVERTIBLE,
-    STR2INT_EMPTY,
+  STR2INT_SUCCESS = 0,
+  STR2INT_OVERFLOW,
+  STR2INT_UNDERFLOW,
+  STR2INT_INCONVERTIBLE,
+  STR2INT_EMPTY,
 } str2int_errno;
 
 /**
@@ -129,20 +158,20 @@ typedef enum {
  * @return str2int_errno 
  */
 str2int_errno str2int(int *out, char *s, int base) {
-    char *end;
-    if (s[0] == '\0' || isspace(s[0]))
-        return STR2INT_EMPTY;
-    errno = 0;
-    long l = strtol(s, &end, base);
-    /* Both checks are needed because INT_MAX == LONG_MAX is possible. */
-    if (l > INT_MAX || (errno == ERANGE && l == LONG_MAX))
-        return STR2INT_OVERFLOW;
-    if (l < INT_MIN || (errno == ERANGE && l == LONG_MIN))
-        return STR2INT_UNDERFLOW;
-    if (*end != '\0')
-        return STR2INT_INCONVERTIBLE;
-    *out = l;
-    return STR2INT_SUCCESS;
+  char *end;
+  if (s[0] == '\0' || isspace(s[0]))
+      return STR2INT_EMPTY;
+  errno = 0;
+  long l = strtol(s, &end, base);
+  /* Both checks are needed because INT_MAX == LONG_MAX is possible. */
+  if (l > INT_MAX || (errno == ERANGE && l == LONG_MAX))
+      return STR2INT_OVERFLOW;
+  if (l < INT_MIN || (errno == ERANGE && l == LONG_MIN))
+      return STR2INT_UNDERFLOW;
+  if (*end != '\0')
+      return STR2INT_INCONVERTIBLE;
+  *out = l;
+  return STR2INT_SUCCESS;
 }
 
 unsigned int string_strip(char** prompt, size_t max_len) {
@@ -155,25 +184,6 @@ unsigned int string_strip(char** prompt, size_t max_len) {
   *itr = '\0';
   return len;
 }
-
-// void getstrn(char** buff, unsigned int* len) {
-//   char next;
-//   unsigned int curr_size = 0;
-//   if(*buff) {
-//     free(*buff);
-//     *buff = 0;
-//   }
-//   *len = 0;
-//   while ((next = getch())) {
-//     if(*len >= curr_size) {
-//       *buff = (char*)realloc(buff, *len*2);
-//     }
-//     *buff[*len] = next;
-//   }
-//   *buff[*len] = '\0';
-
-//   while(getch());
-// }
 
 int get_input_int(char* prompt, int min, int max) {
   char* buff = 0;
@@ -190,34 +200,98 @@ int get_input_int(char* prompt, int min, int max) {
   return num;
 }
 
-void print_board(GameBoard_T* board) {
+void select_cell(GameBoard_T* board, int* index) {
+  int pending_index = -1;
+  switch (getch()) {
+    case ARROW_UP:
+      pending_index = UP(board, *index);
+      break;
+
+    case ARROW_DOWN:
+      pending_index = DOWN(board, *index);
+      break;
+
+    case ARROW_RIGHT:
+      pending_index = RIGHT(board, *index);
+      break;
+
+    case ARROW_LEFT:
+      pending_index = LEFT(board, *index);
+      break;
+
+    default:
+      break;
+  }
+  if (pending_index > -1) {
+    *index = pending_index;
+  }
+}
+
+CellAction_T do_cell_action(GameBoard_T* board, int* index) {
+  while (1) {
+    switch (getch()) {
+      case 'f':
+      case 'F':
+        return FLAG;
+
+      case 'u':
+      case 'U':
+        return UNCOVER;
+      
+      case '\x1B':
+        // Skip the '['
+        getch();
+        select_cell(board, index);
+        return NONE;
+
+      default:
+        break;
+    }
+  }
+}
+
+void print_board(GameBoard_T* board, int select) {
+  move(0, 0);
   for(int r = 0; r < board->height; r++) {
-    char row[board->width+1];
-    row[board->width] = '\0';
     for(int c = 0; c < board->width; c++) {
-      int index = INDEX(r, c, board->width);
-      if(UNCOVERED(CELL(board, index)) && !NUMBOMBS(CELL(board, index))) {
-        row[c] = ' ';
-      } else if(UNCOVERED(CELL(board, index)) && NUMBOMBS(CELL(board, index))) {
-        row[c] = NUMBOMBS(CELL(board, index))+'0';
+      int index = INDEX(board, r, c);
+      if (select == index) {
+        PRINT_CELL_WITH_COLOR(CELL_SELECTED,
+          printw("%s", CELL_SELECTED_ID) 
+        );
+
+      } else if(UNCOVERED(CELL(board, index))) {
+        // FIXME: Don't need this large of a buffer
+        char buff[256] = {'\0'};
+        snprintf(buff, 256, CELL_UNCOVERED_ID, NUMBOMBS(CELL(board, index))+'0');
+        printw("%s", buff);
+
       } else if(FLAGGED(CELL(board, index))) {
-        row[c] = 'F';
+        PRINT_CELL_WITH_COLOR(CELL_FLAGGED,
+          printw("%s", CELL_FLAGGED_ID)
+        );
+
       } else if(HASBOMB(CELL(board, index))) {
-        row[c] = 'X';
+        PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB,
+          printw("%s", CELL_COVERED_ID)
+        );
+
       } else {
-        row[c] = '?';
+        PRINT_CELL_WITH_COLOR(CELL_COVERED,
+          printw("%s", CELL_COVERED_ID)
+        );
       }
     }
-    printw("%s\n", row);
+    printw("\n");
     refresh();
   }
 }
 
-void generate_board(GameBoard_T* state, int rows, int columns) {
-  state->height = rows;
-  state->width = columns;
-  state->board = (uint8_t*)calloc(state->width * state->height, sizeof(uint8_t));
-  state->numBombs = 0;
+void generate_board(GameBoard_T* board, int rows, int columns) {
+  board->height = rows;
+  board->width = columns;
+  board->board = (uint8_t*)calloc(board->width * board->height, sizeof(uint8_t));
+  board->numBombs = 0;
 }
 
 int generate_bombs(GameBoard_T* state, int bombs) {
@@ -229,7 +303,6 @@ int generate_bombs(GameBoard_T* state, int bombs) {
       placement = rand() % (state->width*state->height);
     } while(HASBOMB(KNOWN_CELL(state, placement)));
     SET_HASBOMB(state, placement);
-    // printf("Placed bomb at index %d\n", placement);
   }
 
   // Update the number of bombs around each cell
@@ -244,11 +317,22 @@ int generate_bombs(GameBoard_T* state, int bombs) {
 }
 
 int main(int argc, char** argv, char** envp) {
-  GameState_T gameState = BOARD_GENERATION;
-  GameBoard_T* gameBoard = (GameBoard_T*)malloc(sizeof(GameBoard_T));
+  GameState_T game_state = BOARD_GENERATION;
+  GameBoard_T* game_board = (GameBoard_T*)malloc(sizeof(GameBoard_T));
   int rows, cols, bombs;
 
   srand(11);
+  setlocale(LC_ALL, "");
+  initscr();
+  cbreak();
+  noecho();
+
+  start_color();
+  init_pair(CELL_COVERED, COLOR_BLACK, COLOR_WHITE);
+  init_pair(CELL_SELECTED, COLOR_GREEN, COLOR_GREEN);
+  init_pair(CELL_FLAGGED, COLOR_YELLOW, COLOR_YELLOW);
+  init_pair(CELL_CONTAINS_BOMB, COLOR_RED, COLOR_RED);
+
   if(argc != 4) {
     fprintf(stderr, "Usage: %s <rows> <cols> <bombs>\n", argv[0]);
     exit(1);
@@ -266,29 +350,38 @@ int main(int argc, char** argv, char** envp) {
     fprintf(stderr, "Specified number of bombs %s cannot be converted into an integer\n", argv[3]);
   }
 
-  // rows = get_input_int("Enter number of rows", 5, 100);
-  // cols = get_input_int("Enter number of columns", 5, 100);
-
-  generate_board(gameBoard, rows, cols);
-  generate_bombs(gameBoard, bombs);
-  // DEBUG_PRINT(gameBoard, HASBOMB);
-  // DEBUG_PRINT(gameBoard, NUMBOMBS);
-
-  initscr();
+  generate_board(game_board, rows, cols);
+  generate_bombs(game_board, bombs);
 
   int row;
   int col;
-  int count = 0;
-  while(count < 10) {
-    print_board(gameBoard);
-    // row = get_input_int("Enter row to uncover", 0, gameBoard->height-1);
-    // col = get_input_int("Enter column to uncover", 0, gameBoard->width-1);
-    SET_UNCOVERED(gameBoard, INDEX(row, col, gameBoard->width));
+  CellAction_T next_action;
+  int selected_index = 0;
+  while(1) {
+    print_board(game_board, selected_index);
+    next_action = do_cell_action(game_board, &selected_index);
+    switch (next_action) {
+      case UNCOVER:
+        SET_UNCOVERED(game_board, selected_index);
+        break;
+
+      case FLAG:
+        if (!FLAGGED(selected_index)) {
+          SET_FLAGGED(game_board, selected_index);
+        } else {
+          SET_UNFLAGGED(game_board, selected_index);
+        }
+        break;
+
+      case NONE:
+      default:
+        break;
+    } 
   }
 
   endwin();
-  if (gameBoard->board) {
-    free(gameBoard->board);
+  if (game_board->board) {
+    free(game_board->board);
   }
-  free(gameBoard);
+  free(game_board);
 }
