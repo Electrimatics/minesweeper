@@ -17,11 +17,11 @@
 #define CELL_UNCOVERED  4
 #define CELL_CONTAINS_BOMB 5
 
-#define CELL_COVERED_ID "   "
-#define CELL_SELECTED_ID "\u2591\u2591\u2591"
-#define CELL_FLAGGED_ID " \u2691 "
-#define CELL_UNCOVERED_ID " %c "
-#define CELL_CONTAINS_BOMB_ID " \U1F4A3 "
+#define CELL_COVERED_STR "   "
+#define CELL_SELECTED_STR "\u2591\u2591\u2591"
+#define CELL_FLAGGED_STR " \u2691 "
+#define CELL_UNCOVERED_STR " %c "
+#define CELL_HASBOMB_STR " \U0001F4A3 "
 
 #define PRINT_CELL_WITH_COLOR(color, prints)  attron(COLOR_PAIR(color)); \
                                               prints; \
@@ -81,6 +81,7 @@
                                          : "r" (source))
 
 /* Cell state query and modification macros */
+//TODO: Make the NUMXXX macros take in a gameboard and index
 #define SET_NUMBOMBS(gboard, index, num) (KNOWN_CELL(gboard, index) |= num)
 #define NUMBOMBS(cell)                  (cell & 0X0F)
 
@@ -106,25 +107,13 @@
   printf("\n"); \
 }
 
-/* Bitfields:
-    0-3: Number of surronding bombs (0-8)
-    4: Has bomb
-    5: Flagged
-    6: Uncovered
-    7: Unused
-  */
-typedef struct GameBoard {
-  uint8_t* board;
-  int height;
-  int width;
-  int numBombs;
-} GameBoard_T;
-
 typedef enum GameState {
+  GAME_INIT,
   BOARD_GENERATION, 
   BOMB_GENERATION, 
   TURNS, 
-  EXPLODE, 
+  EXPLODE,
+  TIMEOUT, 
   WIN, 
   CLEANUP
 } GameState_T;
@@ -134,6 +123,26 @@ typedef enum CellAction {
   UNCOVER,
   FLAG,
 } CellAction_T;
+
+
+/* board (uint8_t) bitfields:game_state
+  +------------+---+---+---+---+
+  |    0-3     | 4 | 5 | 6 | 7 |
+  +------------+---+---+---+---+
+  0-3: Number of surronding bombs (0-8)
+  4: Has bomb
+  5: Flagged
+  6: Uncovered
+  7: Unused
+*/
+typedef struct GameBoard {
+  uint8_t* board;
+  int height;
+  int width;
+  int numBombs;
+  int reamining;
+  GameState_T game_state;
+} GameBoard_T;
 
 /* Based on: https://stackoverflow.com/a/12923949 */
 typedef enum {
@@ -174,32 +183,6 @@ str2int_errno str2int(int *out, char *s, int base) {
   return STR2INT_SUCCESS;
 }
 
-unsigned int string_strip(char** prompt, size_t max_len) {
-  unsigned int len = 0;
-  char* itr = *prompt;
-  while(*itr && *itr != '\n' && *itr != '\r' && len < max_len-1) {
-      len++;
-      itr++;
-    }
-  *itr = '\0';
-  return len;
-}
-
-int get_input_int(char* prompt, int min, int max) {
-  char* buff = 0;
-  char* itr;
-  size_t len = 0;
-  int num = 0;
-
-  do {
-    printf("> %s (%d-%d): ", prompt, min, max);
-    getline(&buff, &len, stdin);
-    string_strip(&buff, len);
-  } while(str2int(&num, buff, 10) && num >= min && num <= max);
-
-  return num;
-}
-
 void select_cell(GameBoard_T* board, int* index) {
   int pending_index = -1;
   switch (getch()) {
@@ -230,14 +213,17 @@ void select_cell(GameBoard_T* board, int* index) {
 CellAction_T do_cell_action(GameBoard_T* board, int* index) {
   while (1) {
     switch (getch()) {
+      /* Flag cell */
       case 'f':
       case 'F':
         return FLAG;
 
+      /* Uncover cell */
       case 'u':
       case 'U':
         return UNCOVER;
       
+      /* Move to different cell */
       case '\x1B':
         // Skip the '['
         getch();
@@ -251,34 +237,39 @@ CellAction_T do_cell_action(GameBoard_T* board, int* index) {
 }
 
 void print_board(GameBoard_T* board, int select) {
+  //TODO: Center board + some other terminal validation
   move(0, 0);
   for(int r = 0; r < board->height; r++) {
     for(int c = 0; c < board->width; c++) {
       int index = INDEX(board, r, c);
       if (select == index) {
         PRINT_CELL_WITH_COLOR(CELL_SELECTED,
-          printw("%s", CELL_SELECTED_ID) 
+          printw("%s", CELL_SELECTED_STR) 
         );
 
       } else if(UNCOVERED(CELL(board, index))) {
-        // FIXME: Don't need this large of a buffer
-        char buff[256] = {'\0'};
-        snprintf(buff, 256, CELL_UNCOVERED_ID, NUMBOMBS(CELL(board, index))+'0');
-        printw("%s", buff);
+        if(HASBOMB(CELL(board, index))) {
+          PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB,
+            printw(CELL_HASBOMB_STR);
+          );
+        } else {
+          int bombs = NUMBOMBS(CELL(board, index));
+          printw(CELL_UNCOVERED_STR, (bombs)? bombs+'0' : ' ');
+        }
 
       } else if(FLAGGED(CELL(board, index))) {
         PRINT_CELL_WITH_COLOR(CELL_FLAGGED,
-          printw("%s", CELL_FLAGGED_ID)
+          printw(CELL_FLAGGED_STR)
         );
 
       } else if(HASBOMB(CELL(board, index))) {
         PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB,
-          printw("%s", CELL_COVERED_ID)
+          printw(CELL_COVERED_STR)
         );
 
       } else {
         PRINT_CELL_WITH_COLOR(CELL_COVERED,
-          printw("%s", CELL_COVERED_ID)
+          printw(CELL_COVERED_STR)
         );
       }
     }
@@ -287,16 +278,29 @@ void print_board(GameBoard_T* board, int select) {
   }
 }
 
+GameState_T check_game_condition(GameBoard_T *board, int index) {
+  if (UNCOVERED(CELL(board, index)) && HASBOMB(CELL(board, index))) {
+    return EXPLODE;
+  } else if (board->reamining == 0) {
+    return WIN;
+  } else {
+    return TURNS;
+  }
+}
+
 void generate_board(GameBoard_T* board, int rows, int columns) {
   board->height = rows;
   board->width = columns;
   board->board = (uint8_t*)calloc(board->width * board->height, sizeof(uint8_t));
   board->numBombs = 0;
+  board->reamining = 0;
+  board->game_state = BOARD_GENERATION;
 }
 
 int generate_bombs(GameBoard_T* state, int bombs) {
   // TODO: Instead of choosing all random spots, choose random points for clusters of bombs
   // TODO: Generate bombs that create a radius around the initial click
+  state->game_state = BOMB_GENERATION;
   for(int b = 0; b < bombs; b++) {
     int placement;
     do {
@@ -313,13 +317,20 @@ int generate_bombs(GameBoard_T* state, int bombs) {
     SET_NUMBOMBS(state, i, numBombs);
   }
 
+  state->reamining = (state->width*state->height) - bombs;
+
   return 0;
 }
 
 int main(int argc, char** argv, char** envp) {
-  GameState_T game_state = BOARD_GENERATION;
   GameBoard_T* game_board = (GameBoard_T*)malloc(sizeof(GameBoard_T));
+  game_board->game_state = GAME_INIT;
+
   int rows, cols, bombs;
+  if(argc != 4) {
+    fprintf(stderr, "Usage: %s <rows> <cols> <bombs>\n", argv[0]);
+    exit(1);
+  }
 
   srand(11);
   setlocale(LC_ALL, "");
@@ -332,11 +343,6 @@ int main(int argc, char** argv, char** envp) {
   init_pair(CELL_SELECTED, COLOR_GREEN, COLOR_GREEN);
   init_pair(CELL_FLAGGED, COLOR_YELLOW, COLOR_YELLOW);
   init_pair(CELL_CONTAINS_BOMB, COLOR_RED, COLOR_RED);
-
-  if(argc != 4) {
-    fprintf(stderr, "Usage: %s <rows> <cols> <bombs>\n", argv[0]);
-    exit(1);
-  }
 
   if(str2int(&rows, argv[1], 10)) {
     fprintf(stderr, "Specified rows %s cannot be converted into an integer\n", argv[1]);
@@ -351,22 +357,27 @@ int main(int argc, char** argv, char** envp) {
   }
 
   generate_board(game_board, rows, cols);
+
   generate_bombs(game_board, bombs);
 
-  int row;
-  int col;
+  game_board->game_state = TURNS;
   CellAction_T next_action;
   int selected_index = 0;
-  while(1) {
+  while(game_board->game_state == TURNS) {
     print_board(game_board, selected_index);
+
     next_action = do_cell_action(game_board, &selected_index);
     switch (next_action) {
       case UNCOVER:
+        // We have to check for a explode condition before win condition due to this logic
+        if (!UNCOVERED(CELL(game_board, selected_index))) {
+          game_board->reamining--;
+        }
         SET_UNCOVERED(game_board, selected_index);
         break;
 
       case FLAG:
-        if (!FLAGGED(selected_index)) {
+        if (!FLAGGED(CELL(game_board, selected_index))) {
           SET_FLAGGED(game_board, selected_index);
         } else {
           SET_UNFLAGGED(game_board, selected_index);
@@ -376,9 +387,15 @@ int main(int argc, char** argv, char** envp) {
       case NONE:
       default:
         break;
-    } 
+    }
+
+    game_board->game_state = check_game_condition(game_board, selected_index);
   }
 
+  print_board(game_board, -1);
+  getch();
+
+  game_board->game_state = CLEANUP;
   endwin();
   if (game_board->board) {
     free(game_board->board);
