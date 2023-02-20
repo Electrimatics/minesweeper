@@ -16,6 +16,7 @@
 #define CELL_FLAGGED    3
 #define CELL_UNCOVERED  4
 #define CELL_CONTAINS_BOMB 5
+#define CELL_BACKTRACTED 6
 
 #define CELL_COVERED_STR "   "
 #define CELL_SELECTED_STR "\u2591\u2591\u2591"
@@ -92,19 +93,34 @@
 #define UNCOVERED(cell)                 ((cell & 0x20) >> 5)
 
 #define SET_FLAGGED(gboard, index)       (KNOWN_CELL(gboard, index) |= 0x40)
-#define SET_UNFLAGGED(gboard, index)    (KNOWN_CELL(gboard, index) &= 0xBF)
+#define SET_UNFLAGGED(gboard, index)    (KNOWN_CELL(gboard, index) &= ~0x40)
 #define FLAGGED(cell)                   ((cell & 0x40) >> 6)
+
+#define SET_BACKTRACK_DIR(gboard, index, val)   CLEAR_BACKTRACK_DIR(gboard, index); \
+                                                KNOWN_CELL(gboard, index) |= ((val&0x03) << 6)
+// #define SET_BACKTRACK_DIR_UP(gboard, index) (KNOWN_CELL(gboard, index) |= 0x00)
+// #define SET_BACKTRACK_DIR_DOWN(gboard, index) (KNOWN_CELL(gboard, index) |= 0x40)
+// #define SET_BACKTRACK_DIR_RIGHT(gboard, index) (KNOWN_CELL(gboard, index) |= 0x8f)
+// #define SET_BACKTRACK_DIR_LEFT(gboard, index) (KNOWN_CELL(gboard, index) |= 0xc0)
+#define CLEAR_BACKTRACK_DIR(gboard, index) (KNOWN_CELL(gboard, index) &= ~0xc0)
+#define BACKTRACK_DIR(cell)                ((cell & 0xc0) >> 6)
+
+#define BT_UP   0
+#define BT_DOWN 1
+#define BT_RIGHT 2
+#define BT_LEFT 3
 
 // Num is assumed to be a uint8_t
 #define print_bits(num) { \
   uint8_t n = num & 0xFF; \
   int c = 8; \
   while(c > 0) { \
-    printf("%c", (n&0x80)? '1' : '0'); \
+    printw("%c", (n&0x80)? '1' : '0'); \
     n = n << 1; \
     c--; \
   } \
-  printf("\n"); \
+  printw("\n"); \
+  refresh(); \
 }
 
 typedef enum GameState {
@@ -131,9 +147,9 @@ typedef enum CellAction {
   +------------+---+---+---+---+
   0-3: Number of surronding bombs (0-8)
   4: Has bomb
-  5: Flagged
-  6: Uncovered
-  7: Unused
+  5: Uncovered
+  6: Flagged
+  6-7: Backtrack direction
 */
 typedef struct GameBoard {
   uint8_t* board;
@@ -270,12 +286,91 @@ void print_board(GameBoard_T* board, int select) {
       } else {
         PRINT_CELL_WITH_COLOR(CELL_COVERED,
           printw(CELL_COVERED_STR)
+          // int bombs = NUMBOMBS(CELL(board, index));
+          // printw(CELL_UNCOVERED_STR, (bombs)? bombs+'0' : ' ')
         );
       }
     }
     printw("\n");
     refresh();
   }
+  print_bits(CELL(board, select));
+}
+
+void uncover_cell_block(GameBoard_T *board, int index) {
+  int counter = 0;
+  int force_backtrack = 0;
+
+  // Uncover only 1 cell if it has a bomb in it
+  if (NUMBOMBS(CELL(board, index))) {
+    SET_UNCOVERED(board, index);
+    return;
+  }
+
+  // Traverse open space
+  do {
+    SET_UNCOVERED(board, index);
+    print_board(board, index);
+    getch();
+    // printw("Counter: %d\n", counter);
+    if (!force_backtrack && UP(board, index) != -1 && !UNCOVERED(CELL(board, UP(board, index)))) {
+      index = UP(board, index);
+      SET_BACKTRACK_DIR(board, index, BT_DOWN);
+      counter++;
+    } else if (!force_backtrack && RIGHT(board, index) != -1 && !UNCOVERED(CELL(board, RIGHT(board, index)))) {
+      index = RIGHT(board, index);
+      SET_BACKTRACK_DIR(board, index, BT_LEFT);
+      counter++;
+    } else if (!force_backtrack && DOWN(board, index) != -1 && !UNCOVERED(CELL(board, DOWN(board, index)))) {
+      index = DOWN(board, index);
+      SET_BACKTRACK_DIR(board, index, BT_UP);
+      counter++;
+    } else if (!force_backtrack && LEFT(board, index) != -1 && !UNCOVERED(CELL(board, LEFT(board, index)))) {
+      index = LEFT(board, index);
+      SET_BACKTRACK_DIR(board, index, BT_RIGHT);
+      counter++;
+    } else if(counter > 0 || force_backtrack) {
+      int prev_index = index;
+      switch (BACKTRACK_DIR(CELL(board, index))) {
+      case BT_UP:
+        index = UP(board, index);
+        break;
+      case BT_RIGHT:
+        index = RIGHT(board, index);
+        break;
+      case BT_DOWN:
+        index = DOWN(board, index);
+        break;
+      case BT_LEFT:
+        index = LEFT(board, index);
+        break;
+      default:
+        break;
+      }
+      CLEAR_BACKTRACK_DIR(board, prev_index);
+      // Account for corner-cases (literally)
+      if (!NUMBOMBS(CELL(board, index))) {
+        if (NUMBOMBS(CELL(board, UPLEFT(board, index)))) {
+          SET_UNCOVERED(board, UPLEFT(board, index));
+        }
+        if (NUMBOMBS(CELL(board, UPRIGHT(board, index)))) {
+          SET_UNCOVERED(board, UPRIGHT(board, index));
+        }
+        if (NUMBOMBS(CELL(board, DOWNLEFT(board, index)))) {
+          SET_UNCOVERED(board, DOWNLEFT(board, index));
+        }
+        if (NUMBOMBS(CELL(board, DOWNRIGHT(board, index)))) {
+          SET_UNCOVERED(board, DOWNRIGHT(board, index));
+        }
+      }
+      counter--;
+      force_backtrack = 0;
+    }
+
+    if (NUMBOMBS(CELL(board, index))) {
+      force_backtrack = 1;
+    }
+  } while(counter > 0);
 }
 
 GameState_T check_game_condition(GameBoard_T *board, int index) {
@@ -343,6 +438,7 @@ int main(int argc, char** argv, char** envp) {
   init_pair(CELL_SELECTED, COLOR_GREEN, COLOR_GREEN);
   init_pair(CELL_FLAGGED, COLOR_YELLOW, COLOR_YELLOW);
   init_pair(CELL_CONTAINS_BOMB, COLOR_RED, COLOR_RED);
+  init_pair(CELL_BACKTRACTED, COLOR_CYAN, COLOR_CYAN);
 
   if(str2int(&rows, argv[1], 10)) {
     fprintf(stderr, "Specified rows %s cannot be converted into an integer\n", argv[1]);
@@ -373,7 +469,7 @@ int main(int argc, char** argv, char** envp) {
         if (!UNCOVERED(CELL(game_board, selected_index))) {
           game_board->reamining--;
         }
-        SET_UNCOVERED(game_board, selected_index);
+        uncover_cell_block(game_board, selected_index);
         break;
 
       case FLAG:
