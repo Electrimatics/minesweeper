@@ -46,8 +46,10 @@
 // Checks if a cell index is within the bounds of the gameboard
 #define CELL_BOUND_CHECk(gboard, index)  ((index >= 0 && index < gboard->width*gboard->height))
 
-// Return a cell's contents if it's in the gameboard, null otherwise 
-#define CELL(gboard, index)              (CELL_BOUND_CHECk(gboard, index)? *(gboard->board+index) : 0)
+// Return a cell's contents if it's in the gameboard, default cell otherwise 
+// Default cell: No surronding bombs, does not have bomb, uncovered, not flagged
+#define DEFAULT_CELL  (0b00100000)
+#define CELL(gboard, index)              (CELL_BOUND_CHECk(gboard, index)? *(gboard->board+index) : DEFAULT_CELL)
 
 // Gets the contents of a cell without checking the index. Used by other macros
 #define KNOWN_CELL(gboard, index)        (*(gboard->board+index))
@@ -66,6 +68,26 @@
 #define RIGHT(gboard, index)             (INDEX_IN_ROW(gboard, index+1, index/gboard->width))
 #define UPRIGHT(gboard, index)           (INDEX_IN_ROW(gboard, index-gboard->width+1, (index/gboard->width)-1))
 
+#define SURRONDING_CELL_ACTOIN(gboard, index, ACTION) \
+                                                    ACTION(gboard, UP(gboard, index)); \
+                                                    ACTION(gboard, UPLEFT(gboard, index)); \
+                                                    ACTION(gboard, LEFT(gboard, index)); \
+                                                    ACTION(gboard, DOWNLEFT(gboard, index)); \
+                                                    ACTION(gboard, DOWN(gboard, index)); \
+                                                    ACTION(gboard, DOWNRIGHT(gboard, index)); \
+                                                    ACTION(gboard, RIGHT(gboard, index)); \
+                                                    ACTION(gboard, UPRIGHT(gboard, index))
+
+#define SURRONDING_CELL_ACTION_STATEFUL(gboard, index, ACTION, STATE) \
+  if (STATE(CELL(gboard, UP(gboard, index)))) ACTION(gboard, UP(gboard, index)); \
+  if (STATE(CELL(gboard, UPLEFT(gboard, index)))) ACTION(gboard, UPLEFT(gboard, index)); \
+  if (STATE(CELL(gboard, LEFT(gboard, index)))) ACTION(gboard, LEFT(gboard, index)); \
+  if (STATE(CELL(gboard, DOWNLEFT(gboard, index)))) ACTION(gboard, DOWNLEFT(gboard, index)); \
+  if (STATE(CELL(gboard, DOWN(gboard, index)))) ACTION(gboard, DOWN(gboard, index)); \
+  if (STATE(CELL(gboard, DOWNRIGHT(gboard, index)))) ACTION(gboard, DOWNRIGHT(gboard, index)); \
+  if (STATE(CELL(gboard, RIGHT(gboard, index)))) ACTION(gboard, RIGHT(gboard, index)); \
+  if (STATE(CELL(gboard, UPRIGHT(gboard, index)))) ACTION(gboard, UPRIGHT(gboard, index))
+
 // Checks the surronding cells for a provided state
 #define SURRONDING_CELL_STATE(gboard, index, STATE) (STATE(CELL(gboard, UP(gboard, index))) << 7 | \
                                                     STATE(CELL(gboard, UPLEFT(gboard, index))) << 6 | \
@@ -75,11 +97,19 @@
                                                     STATE(CELL(gboard, DOWNRIGHT(gboard, index))) << 2 | \
                                                     STATE(CELL(gboard, RIGHT(gboard, index))) << 1 | \
                                                     STATE(CELL(gboard, UPRIGHT(gboard, index))))
+#define UP_CELLS  0b111000001
+#define LEFT_CELL 0b01110000
+#define DOWN_CELL 0b00011100
+#define RIGHT_CELLS 0b000001111
+
 /* This is not portable, but it is fast */
 #define COUNT_BITS(result, source)       __asm__ __volatile__ \
                                         ("popcnt %0, %1;" \
                                          : "=r" (result) \
                                          : "r" (source))
+// #define COUNT_BITS(result, number)  for(int i = 0; i < sizeof(number); i++) { \
+//                                       (result) += (number & 0x01); \
+//                                     }
 
 /* Cell state query and modification macros */
 //TODO: Make the NUMXXX macros take in a gameboard and index
@@ -104,11 +134,12 @@
 // #define SET_BACKTRACK_DIR_LEFT(gboard, index) (KNOWN_CELL(gboard, index) |= 0xc0)
 #define CLEAR_BACKTRACK_DIR(gboard, index) (KNOWN_CELL(gboard, index) &= ~0xc0)
 #define BACKTRACK_DIR(cell)                ((cell & 0xc0) >> 6)
-
 #define BT_UP   0
 #define BT_DOWN 1
 #define BT_RIGHT 2
 #define BT_LEFT 3
+
+#define UNCOVER_BLOCK_CONDITION(gboard, index, DIR) (DIR(board, index) != -1 && !NUMBOMBS(CELL(board, DIR(board, index))) && !UNCOVERED(CELL(board, DIR(board, index))))
 
 // Num is assumed to be a uint8_t
 #define print_bits(num) { \
@@ -298,79 +329,95 @@ void print_board(GameBoard_T* board, int select) {
 }
 
 void uncover_cell_block(GameBoard_T *board, int index) {
-  int counter = 0;
-  int force_backtrack = 0;
+  int start_index = index;
+  int prev_index = index;
 
   // Uncover only 1 cell if it has a bomb in it
   if (NUMBOMBS(CELL(board, index))) {
     SET_UNCOVERED(board, index);
+    board->reamining--;
     return;
   }
 
   // Traverse open space
   do {
     SET_UNCOVERED(board, index);
-    print_board(board, index);
-    getch();
+    board->reamining--;
+    SURRONDING_CELL_ACTION_STATEFUL(board, index, SET_UNCOVERED, NUMBOMBS);
+    // print_board(board, index);
     // printw("Counter: %d\n", counter);
-    if (!force_backtrack && UP(board, index) != -1 && !UNCOVERED(CELL(board, UP(board, index)))) {
+    // refresh();
+    // getch();
+    
+    if (UNCOVER_BLOCK_CONDITION(board, index, UP)) {
       index = UP(board, index);
       SET_BACKTRACK_DIR(board, index, BT_DOWN);
-      counter++;
-    } else if (!force_backtrack && RIGHT(board, index) != -1 && !UNCOVERED(CELL(board, RIGHT(board, index)))) {
+      continue;
+    }
+    if (UNCOVER_BLOCK_CONDITION(board, index, RIGHT)) {
       index = RIGHT(board, index);
       SET_BACKTRACK_DIR(board, index, BT_LEFT);
-      counter++;
-    } else if (!force_backtrack && DOWN(board, index) != -1 && !UNCOVERED(CELL(board, DOWN(board, index)))) {
+      continue;
+    }
+    if (UNCOVER_BLOCK_CONDITION(board, index, DOWN)) {
       index = DOWN(board, index);
       SET_BACKTRACK_DIR(board, index, BT_UP);
-      counter++;
-    } else if (!force_backtrack && LEFT(board, index) != -1 && !UNCOVERED(CELL(board, LEFT(board, index)))) {
+      continue;
+    }
+    if (UNCOVER_BLOCK_CONDITION(board, index, LEFT)) {
       index = LEFT(board, index);
       SET_BACKTRACK_DIR(board, index, BT_RIGHT);
-      counter++;
-    } else if(counter > 0 || force_backtrack) {
-      int prev_index = index;
+      continue;
+    }
+    if (index != start_index) {
+      prev_index = index;
       switch (BACKTRACK_DIR(CELL(board, index))) {
       case BT_UP:
+        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNRIGHT)) {
+          uncover_cell_block(board, DOWNRIGHT(board, index));
+        }
+        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNLEFT)) {
+          uncover_cell_block(board, DOWNLEFT(board, index));
+        }
         index = UP(board, index);
         break;
+
       case BT_RIGHT:
+        if (UNCOVER_BLOCK_CONDITION(board, index, UPLEFT)) {
+          uncover_cell_block(board, UPLEFT(board, index));
+        }
+        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNLEFT)) {
+          uncover_cell_block(board, DOWNLEFT(board, index));
+        }
         index = RIGHT(board, index);
         break;
+
       case BT_DOWN:
+        if (UNCOVER_BLOCK_CONDITION(board, index, UPLEFT)) {
+          uncover_cell_block(board, UPLEFT(board, index));
+        }
+        if (UNCOVER_BLOCK_CONDITION(board, index, UPRIGHT)) {
+          uncover_cell_block(board, UPRIGHT(board, index));
+        }
         index = DOWN(board, index);
         break;
+
       case BT_LEFT:
+        if (UNCOVER_BLOCK_CONDITION(board, index, UPRIGHT)) {
+          uncover_cell_block(board, UPRIGHT(board, index));
+        }
+        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNRIGHT)) {
+          uncover_cell_block(board, DOWNRIGHT(board, index));
+        }
         index = LEFT(board, index);
         break;
+
       default:
         break;
       }
       CLEAR_BACKTRACK_DIR(board, prev_index);
-      // Account for corner-cases (literally)
-      if (!NUMBOMBS(CELL(board, index))) {
-        if (NUMBOMBS(CELL(board, UPLEFT(board, index)))) {
-          SET_UNCOVERED(board, UPLEFT(board, index));
-        }
-        if (NUMBOMBS(CELL(board, UPRIGHT(board, index)))) {
-          SET_UNCOVERED(board, UPRIGHT(board, index));
-        }
-        if (NUMBOMBS(CELL(board, DOWNLEFT(board, index)))) {
-          SET_UNCOVERED(board, DOWNLEFT(board, index));
-        }
-        if (NUMBOMBS(CELL(board, DOWNRIGHT(board, index)))) {
-          SET_UNCOVERED(board, DOWNRIGHT(board, index));
-        }
-      }
-      counter--;
-      force_backtrack = 0;
     }
-
-    if (NUMBOMBS(CELL(board, index))) {
-      force_backtrack = 1;
-    }
-  } while(counter > 0);
+  } while(index != start_index);
 }
 
 GameState_T check_game_condition(GameBoard_T *board, int index) {
