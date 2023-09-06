@@ -1,12 +1,16 @@
 CXX := gcc
-FLAGS := -Wall
-LIBS := ncursesw
+# TODO: Remove debug flag
+FLAGS := -Wall -g
+LIBS := ncursesw panel
 
-minesweeper: minesweeper.c
+minesweeper: panel_manager.o minesweeper.c
 	$(CXX) $(FLAGS) $^ -o $@ $(LIBS:%=-l%)
 
-debug: minesweeper.c
-	$(CXX) $(FLAGS) -DDEBUG -g $^ -o minesweeper_$@ $(LIBS:%=-l%)
+debug: panel_manager.o minesweeper.c
+	$(CXX) $(FLAGS) -DDEBUG $^ -o minesweeper_$@ $(LIBS:%=-l%)
+
+panel_manager.o: panel_manager.c
+	$(CXX) -c $(FLAGS) $^
 
 valgrind:
 	valgrind --leak-check=full --show-leak-kinds=all ./minesweeper

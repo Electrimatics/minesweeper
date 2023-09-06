@@ -52,11 +52,11 @@ PanelData_T *pm_panel_init(PanelManager_T *pm, int y, int x, int height,
 
   /* Create panel. Window is accessable under pd->panel->win */
   pd->panel = new_panel(win);
-
   pd->y = y;
   pd->x = x;
   pd->height = height;
   pd->width = width;
+  // pd->name = name;
   pd->draw_handler = draw_handler;
   pd->init_cb = init_cb;
   pd->exit_cb = exit_cb;
@@ -94,13 +94,16 @@ WINDOW *pm_panel_resize(PanelData_T *pd, int new_height, int new_width,
 void pm_panel_draw(PanelManager_T *pm, int index, void *opaque) {
   PanelData_T *pd = pm_get_panel(pm, index);
   pd->draw_handler(pd->panel->win, opaque);
+  doupdate();
 }
 
 void pm_panel_draw_all(PanelManager_T *pm, void *opaque) {
-  PM_FOR_EACH_PANEL(
-      pm, if (pm->panels[p]->draw_handler) {
-        pm->panels[p]->draw_handler(pm->panels[p]->panel->win, opaque);
-      })
+  for (int p = 0; p < pm->panel_count; p++) {
+    if (pm->panels[p]->draw_handler) {
+      pm->panels[p]->draw_handler(pm->panels[p]->panel->win, opaque);
+    }
+  }
+  doupdate();
 }
 
 void pm_panel_move(PanelData_T *pd, int new_x, int new_y, int old_x, int old_y);

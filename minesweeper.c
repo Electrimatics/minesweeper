@@ -175,9 +175,9 @@
 #define CLEAR_FLAGGED(board, index) (KNOWN_CELL(board, index) &= ~CELL_FLAGGED_BIT)
 #define FLAGGED(board, index) ((CELL(board, index) & CELL_FLAGGED_BIT))
 
-#define SET_UPDATED(board, index) (KNOWN_CELL(board, index) |= CELL_UPDATED_BIT)
-#define CLEAR_UPDATED(board, index) (KNOWN_CELL(board, index) &= ~CELL_UPDATED_BIT)
-#define UPDATED(board, index) (CELL(board, index) & CELL_UPDATED_BIT)
+#define SET_PRINTED(board, index) (KNOWN_CELL(board, index) |= CELL_PRINTED_BIT)
+#define CLEAR_PRINTED(board, index) (KNOWN_CELL(board, index) &= ~CELL_PRINTED_BIT)
+#define PRINTED(board, index) (CELL(board, index) & CELL_PRINTED_BIT)
 
 #define SET_BACKTRACK_DIR(board, index, val)                                  \
   CLEAR_BACKTRACK_DIR(board, index);                                          \
@@ -250,14 +250,14 @@ typedef enum PrintAction {
   +------------+---+---+---+---+
   | 7 | 6 | 5 | 4 |    3-0     |
   +------------+---+---+---+---+
-  7: Modified state
+  7: Cell updates printed (0 means need print)
   6: Flagged
   5: Uncovered
   4: Has bomb
   3-0: Number of surronding bombs (0-8)
      : When backtracking: Incoming direction
 */
-#define CELL_UPDATED_BIT (1 << 7)
+#define CELL_PRINTED_BIT (1 << 7)
 #define CELL_FLAGGED_BIT (1 << 6)
 #define CELL_UNCOVERED_BIT (1 << 5)
 #define CELL_HASBOMB_BIT (1 << 4)
@@ -381,33 +381,6 @@ CellAction_T do_cell_action(GameBoard_T* board) {
   return action;
 }
 
-void print_cell_contents(GameBoard_T *board, unsigned int index) {
-  if (board->current_cell == index) {
-      PRINT_CELL_WITH_COLOR(CELL_SELECTED, addstr(CELL_SELECTED_STR));
-
-  } else if (UNCOVERED(board, index)) {
-    if (HASBOMB(board, index)) {
-      PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, addstr(CELL_HASBOMB_STR));
-    } else {
-      int bombs = NUMBOMBS(board, index);
-      PRINT_CELL_WITH_COLOR(bombs,
-        printw(CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' ');
-      );
-    }
-
-  } else if (FLAGGED(board, index)) {
-    PRINT_CELL_WITH_COLOR(CELL_FLAGGED, addstr(CELL_FLAGGED_STR));
-
-#ifdef DEBUG
-  } else if (HASBOMB(board, index)) {
-    PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, addstr(CELL_COVERED_STR));
-#endif
-
-  } else {
-    PRINT_CELL_WITH_COLOR(CELL_COVERED, addstr(CELL_COVERED_STR));
-  }
-}
-
 void print_headers(WINDOW* win, void *opaque) {
   GameBoard_T *board = (GameBoard_T*)opaque;
   wmove(win, 0, 0);
@@ -417,40 +390,58 @@ void print_headers(WINDOW* win, void *opaque) {
   wrefresh(win);
 }
 
-// void print_board_cell(WINDOW* win, GameBoard_T *board, unsigned int index, unsigned int select) {
-//   wmove(win, 0, 0);
-//   print_cell_contents(board, index, select);
-//   /* Move the cursor out of the gameboard */
-//   //FIXME: This is now broken
-// #ifdef DEBUG
-//   move(board->y_win_position+board->height, board->x_win_position);
-//   printw("Current cell: ");
-//   print_bits(CELL(board, select));
-//   printw("\tNUMBOMBS: %d\tHASBOMB: %d\tUNCOVERED: %d\tFLAGGED: %d\n",
-//          NUMBOMBS(board, select), HASBOMB(board, select),
-//          UNCOVERED(board, select), FLAGGED(board, select));
-//   printw("Remaining: %d\n", board->reamining);
-// #endif
-//   move(0,0);
-//   refresh();
-// }
+void print_cell_contents(WINDOW* win, GameBoard_T *board, unsigned int index) {
+  if (board->current_cell == index) {
+      PRINT_CELL_WITH_COLOR(CELL_SELECTED, waddstr(win, CELL_SELECTED_STR));
 
-void print_board(WINDOW* win, GameBoard_T *board) {
+  } else if (UNCOVERED(board, index)) {
+    if (HASBOMB(board, index)) {
+      PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, waddstr(win, CELL_HASBOMB_STR));
+    } else {
+      int bombs = NUMBOMBS(board, index);
+      PRINT_CELL_WITH_COLOR(bombs,
+        wprintw(win, CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' ');
+      );
+    }
+
+  } else if (FLAGGED(board, index)) {
+    PRINT_CELL_WITH_COLOR(CELL_FLAGGED, waddstr(win, CELL_FLAGGED_STR));
+
+#ifdef DEBUG
+  } else if (HASBOMB(board, index)) {
+    PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, waddstr(win, CELL_COVERED_STR));
+#endif
+
+  } else {
+    PRINT_CELL_WITH_COLOR(CELL_COVERED, waddstr(win, CELL_COVERED_STR));
+  }
+}
+
+void print_board(WINDOW* win, void *opaque) {
+  GameBoard_T* board = (GameBoard_T*)opaque;
   wmove(win, 0, 0);
   int curr_row = 0;
   for (unsigned int index = 0; index < board->height * board->width; index++) {
-    /* If the cell has been updated, print it again */
-    if (UPDATED(board, index)) {
-      print_cell_contents(board, index);
+    /* If the cell has been PRINTED, print it again */
+    if (!PRINTED(board, index)) {
+      print_cell_contents(win, board, index);
+      SET_PRINTED(board, index);
     }
 
     /* Move down to the next row to print */
     if (!((index + 1) % board->width)) {
-      move(++curr_row, 0);
+      wmove(win, ++curr_row, 0);
       wrefresh(win);
     }
   }
 }
+
+// void print_boarder(WINDOW* win, VOID *opaque) {
+//   GameBoard_T* board = (GameBoard_T*)opaque;
+//   wmove(win, getmaxy(win), 0);
+//   printw
+
+// }
 
 void uncover_cell_block(GameBoard_T *board, unsigned int index) {
   unsigned int start_index = index;
@@ -463,6 +454,7 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
   // Uncover only 1 cell if it has a bomb in it
   if (NUMBOMBS(board, index) || HASBOMB(board, index)) {
     SET_UNCOVERED(board, index);
+    CLEAR_PRINTED(board, index);
     board->reamining--;
     return;
   }
@@ -477,6 +469,7 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
 
     if (!UNCOVERED(board, index)) {
       SET_UNCOVERED(board, index);
+      CLEAR_PRINTED(board, index);
       board->reamining--;
     }
 
@@ -489,12 +482,9 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
 
     SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits,
                                     SET_UNCOVERED);
+    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits,
+                                    CLEAR_PRINTED);
     board->reamining -= newly_uncovered;
-    // print_board_refresh(board, index);
-    // print_bits(adjacent_bombs_bits);
-    // print_bits(surronding_uncovered_bits);
-    // printw("%d\n", newly_uncovered);
-    // getch();
 
     if (UNCOVER_BLOCK_CONDITION(board, index, UP)) {
       index = UP(board, index);
@@ -595,25 +585,32 @@ GameState_T check_game_condition(GameBoard_T *board, unsigned int index) {
 }
 
 int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) {
-  int max_x = getmaxx(stdscr);
-  int max_y = getmaxy(stdscr);
-  if (max_y < 5 + board->height || max_x < 2 + board->width) {
-    return 0;
-  }
-  board->pm = pm_init(3);
-  // TODO: Support scroling
-  int y_align = getmaxy(stdscr)/2 - rows/2;
-  int x_align = getmaxx(stdscr)/2 - (columns*CELL_STR_LEN)/2;
-  /* (bottom) stdstr -> background -> headers -> game board (top)*/
-  pm_panel_init(board->pm, 0, 0, max_y, max_x, "background", NULL, NULL, NULL);
-  pm_panel_init(board->pm, y_align-1, x_align, 3, 3, "headers", print_headers, NULL, NULL);
-  pm_panel_init(board->pm, y_align, x_align, board->height, board->width, "gameboard", NULL, NULL, NULL);
   setlocale(LC_ALL, "");
   initscr();
   cbreak();
   noecho();
   keypad(stdscr, TRUE);
 
+  /* Use the stdscr as a base and validate we can fit the gameboard */
+  int maxy = getmaxy(stdscr);
+  int maxx = getmaxx(stdscr);
+  if (!maxx || !maxy || maxy < 5 + board->height || maxx < 2 + board->width) {
+    return 1;
+  }
+
+  /* Create the panels and their windows */
+  /* (bottom) stdstr -> background -> headers -> gameboard (top) */
+  // TODO: Support scroling
+  board->pm = pm_init(3);
+  int yalign = maxy/2 - rows/2;
+  int xalign = maxx/2 - (columns*CELL_STR_LEN)/2;
+  pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
+  pm_panel_init(board->pm, yalign-3, xalign, 3, 3, "headers", print_headers, NULL, NULL);
+  pm_panel_init(board->pm, yalign, xalign, board->height, board->width, "gameboard", print_board, NULL, NULL);
+  update_panels();
+  doupdate();
+
+  /* Setup colors */
   start_color();
   init_pair(CELL_COVERED, COLOR_BLACK, COLOR_WHITE);
   init_pair(CELL_SELECTED, COLOR_WHITE, COLOR_GREEN);
@@ -643,7 +640,6 @@ void generate_board(GameBoard_T *board, unsigned int rows,
   board->current_cell = 0;
   board->numBombs = 0;
   board->reamining = 0;
-  board->current_cell = 0;
   board->seconds_remaining = 300;
   board->timeout = 1000;    /* 1000 ms */
 }
@@ -709,18 +705,20 @@ int main(int argc, char **argv, char **envp) {
   }
 
   box(stdscr, 0, 0);
-  if (!terminal_setup(board, rows, cols)) {
-    printw("Terminal initialization failed. Exiting...\n");
+  if (terminal_setup(board, rows, cols)) {
+    printw("Terminal initialization failed. Exiting.\n");
   } else {
+    generate_board(board, rows, cols);
     generate_bombs(board, bombs);
 
     board->game_state = TURNS;
     CellAction_T next_action;
     unsigned int prev_index;
 
-    print_board(board, board->current_cell);
     while (board->game_state == TURNS) {
-      next_action = *(CellAction_T*)pm_do_active_keypress_handler((void*)board);
+      pm_panel_draw_all(board->pm, (void*)board);
+      CLEAR_PRINTED(board, board->current_cell);
+      next_action = do_cell_action(board);
       if (board->timeout <= 0) {
         board->timeout = 1000;
         board->seconds_remaining--;
@@ -729,16 +727,16 @@ int main(int argc, char **argv, char **envp) {
       case UNCOVER:
         // We have to check for a explode condition before win condition due to
         // this logic
-        uncover_cell_block(board, selected_index);
-        print_board_refresh(board, selected_index);
+        uncover_cell_block(board, board->current_cell);
         break;
 
       case FLAG:
-        if (!FLAGGED(board, selected_index)) {
-          SET_FLAGGED(board, selected_index);
+        if (!FLAGGED(board, board->current_cell)) {
+          SET_FLAGGED(board, board->current_cell);
         } else {
-          CLEAR_FLAGGED(board, selected_index);
+          CLEAR_FLAGGED(board, board->current_cell);
         }
+        CLEAR_PRINTED(board, board->current_cell);
         break;
 
       case EXIT:
@@ -746,7 +744,7 @@ int main(int argc, char **argv, char **envp) {
         break;
 
       case MOVE:
-        print_board_cell(board, prev_index, selected_index);
+        CLEAR_PRINTED(board, board->current_cell);
         break;
 
       case NONE:
@@ -754,14 +752,12 @@ int main(int argc, char **argv, char **envp) {
         break;
       }
 
-      print_headers(board);
-      print_board_cell(board, selected_index, selected_index);
-      board->game_state = check_game_condition(board, selected_index);
+      board->game_state = check_game_condition(board, board->current_cell);
     }
-
-    print_board_refresh(board, -1);
   }
-  printw("Press any key to continue...")
+
+  printw("Press any key to continue...");
+  refresh();
   getch();
 
   board->game_state = CLEANUP;
