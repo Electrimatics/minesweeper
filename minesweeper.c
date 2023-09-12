@@ -594,7 +594,7 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   /* Use the stdscr as a base and validate we can fit the gameboard */
   int maxy = getmaxy(stdscr);
   int maxx = getmaxx(stdscr);
-  if (!maxx || !maxy || maxy < 5 + board->height || maxx < 2 + board->width) {
+  if (!maxx || !maxy || maxy < 5 + rows || maxx < 2 + columns) {
     return 1;
   }
 
@@ -604,9 +604,9 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   board->pm = pm_init(3);
   int yalign = maxy/2 - rows/2;
   int xalign = maxx/2 - (columns*CELL_STR_LEN)/2;
-  pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
-  pm_panel_init(board->pm, yalign-3, xalign, 3, 3, "headers", print_headers, NULL, NULL);
-  pm_panel_init(board->pm, yalign, xalign, board->height, board->width, "gameboard", print_board, NULL, NULL);
+  // pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
+  pm_panel_init(board->pm, 0, 0, 3, 3, "headers", print_headers, NULL, NULL);
+  pm_panel_init(board->pm, 4, 0, rows, columns*CELL_STR_LEN, "gameboard", print_board, NULL, NULL);
   update_panels();
   doupdate();
 
@@ -627,7 +627,7 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   init_pair(CELL_SEVEN_SURRONDING, COLOR_BLACK, COLOR_BLACK);
   init_pair(CELL_EIGHT_SURRONDING, COLOR_BLACK, COLOR_BLACK);
 
-  return 1;
+  return 0;
 }
 
 void generate_board(GameBoard_T *board, unsigned int rows,
@@ -704,7 +704,6 @@ int main(int argc, char **argv, char **envp) {
         argv[3]);
   }
 
-  box(stdscr, 0, 0);
   if (terminal_setup(board, rows, cols)) {
     printw("Terminal initialization failed. Exiting.\n");
   } else {
@@ -716,7 +715,7 @@ int main(int argc, char **argv, char **envp) {
     unsigned int prev_index;
 
     while (board->game_state == TURNS) {
-      pm_panel_draw_all(board->pm, (void*)board);
+      // pm_panel_draw_all(board->pm, (void*)board);
       CLEAR_PRINTED(board, board->current_cell);
       next_action = do_cell_action(board);
       if (board->timeout <= 0) {

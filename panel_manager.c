@@ -64,6 +64,8 @@ PanelData_T *pm_panel_init(PanelManager_T *pm, int y, int x, int height,
   pm->panels[pm->panel_count] = pd;
   pm->panel_count++;
 
+  box(pd->panel->win, 0, 0);
+
   return pd;
 }
 
