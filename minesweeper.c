@@ -383,9 +383,9 @@ CellAction_T do_cell_action(GameBoard_T* board) {
 
 void print_headers(WINDOW* win, void *opaque) {
   GameBoard_T *board = (GameBoard_T*)opaque;
-  wmove(win, 0, 0);
+  wmove(win, 1, 1);
   waddstr(win, GameStateStr[board->game_state]);
-  move(0, getmaxx(win)-3);
+  move(1, getmaxx(win)-3);
   wprintw(win, "%03d", board->seconds_remaining);
   wrefresh(win);
 }
@@ -419,7 +419,7 @@ void print_cell_contents(WINDOW* win, GameBoard_T *board, unsigned int index) {
 
 void print_board(WINDOW* win, void *opaque) {
   GameBoard_T* board = (GameBoard_T*)opaque;
-  wmove(win, 0, 0);
+  wmove(win, 1, 1);
   int curr_row = 0;
   for (unsigned int index = 0; index < board->height * board->width; index++) {
     /* If the cell has been PRINTED, print it again */
@@ -430,7 +430,7 @@ void print_board(WINDOW* win, void *opaque) {
 
     /* Move down to the next row to print */
     if (!((index + 1) % board->width)) {
-      wmove(win, ++curr_row, 0);
+      wmove(win, ++curr_row, 1);
       wrefresh(win);
     }
   }
@@ -604,9 +604,10 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   board->pm = pm_init(3);
   int yalign = maxy/2 - rows/2;
   int xalign = maxx/2 - (columns*CELL_STR_LEN)/2;
+  /* +2 for boarder */
   // pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
-  pm_panel_init(board->pm, 0, 0, 3, 3, "headers", print_headers, NULL, NULL);
-  pm_panel_init(board->pm, 4, 0, rows, columns*CELL_STR_LEN, "gameboard", print_board, NULL, NULL);
+  // pm_panel_init(board->pm, 0, 0, 5, columns*CELL_STR_LEN+2, "headers", print_headers, NULL, NULL);
+  pm_panel_init(board->pm, 3, 0, rows+2, columns*CELL_STR_LEN+2, "gameboard", print_board, NULL, NULL);
   update_panels();
   doupdate();
 
@@ -715,7 +716,7 @@ int main(int argc, char **argv, char **envp) {
     unsigned int prev_index;
 
     while (board->game_state == TURNS) {
-      // pm_panel_draw_all(board->pm, (void*)board);
+      pm_panel_draw_all(board->pm, (void*)board);
       CLEAR_PRINTED(board, board->current_cell);
       next_action = do_cell_action(board);
       if (board->timeout <= 0) {
