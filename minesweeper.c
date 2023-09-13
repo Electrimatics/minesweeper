@@ -44,10 +44,10 @@
 #define CELL_HASBOMB_STR "[B]"
 #endif
 
-#define PRINT_CELL_WITH_COLOR(color, prints)                                   \
-  attron(COLOR_PAIR(color));                                                   \
+#define PRINT_CELL_WITH_COLOR(win, color, prints)                                   \
+  wattron(win, COLOR_PAIR(color));                                                   \
   prints;                                                                      \
-  attroff(COLOR_PAIR(color))
+  wattroff(win, COLOR_PAIR(color))
 
 // #define CELL_COVERED  "\x1B[47m" _COVERED "\x1B[0m"
 // #define CELL_SELECTED "\x1B[42m" _SELECTED "\x1B[0m"
@@ -392,28 +392,28 @@ void print_headers(WINDOW* win, void *opaque) {
 
 void print_cell_contents(WINDOW* win, GameBoard_T *board, unsigned int index) {
   if (board->current_cell == index) {
-      PRINT_CELL_WITH_COLOR(CELL_SELECTED, waddstr(win, CELL_SELECTED_STR));
+      PRINT_CELL_WITH_COLOR(win, CELL_SELECTED, waddstr(win, CELL_SELECTED_STR));
 
   } else if (UNCOVERED(board, index)) {
     if (HASBOMB(board, index)) {
-      PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, waddstr(win, CELL_HASBOMB_STR));
+      PRINT_CELL_WITH_COLOR(win, CELL_CONTAINS_BOMB, waddstr(win, CELL_HASBOMB_STR));
     } else {
       int bombs = NUMBOMBS(board, index);
-      PRINT_CELL_WITH_COLOR(bombs,
+      PRINT_CELL_WITH_COLOR(win, bombs,
         wprintw(win, CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' ');
       );
     }
 
   } else if (FLAGGED(board, index)) {
-    PRINT_CELL_WITH_COLOR(CELL_FLAGGED, waddstr(win, CELL_FLAGGED_STR));
+    PRINT_CELL_WITH_COLOR(win, CELL_FLAGGED, waddstr(win, CELL_FLAGGED_STR));
 
 #ifdef DEBUG
   } else if (HASBOMB(board, index)) {
-    PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, waddstr(win, CELL_COVERED_STR));
+    PRINT_CELL_WITH_COLOR(win, CELL_CONTAINS_BOMB, waddstr(win, CELL_COVERED_STR));
 #endif
 
   } else {
-    PRINT_CELL_WITH_COLOR(CELL_COVERED, waddstr(win, CELL_COVERED_STR));
+    PRINT_CELL_WITH_COLOR(win, CELL_COVERED, waddstr(win, CELL_COVERED_STR));
   }
 }
 
@@ -606,7 +606,7 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   int xalign = maxx/2 - (columns*CELL_STR_LEN)/2;
   /* +2 for boarder */
   // pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
-  // pm_panel_init(board->pm, 0, 0, 5, columns*CELL_STR_LEN+2, "headers", print_headers, NULL, NULL);
+  pm_panel_init(board->pm, 0, 0, 5, columns*CELL_STR_LEN+2, "headers", print_headers, NULL, NULL);
   pm_panel_init(board->pm, 3, 0, rows+2, columns*CELL_STR_LEN+2, "gameboard", print_board, NULL, NULL);
   update_panels();
   doupdate();
