@@ -420,20 +420,39 @@ void print_cell_contents(WINDOW* win, GameBoard_T *board, unsigned int index) {
 void print_board(WINDOW* win, void *opaque) {
   GameBoard_T* board = (GameBoard_T*)opaque;
   wmove(win, 1, 1);
-  int curr_row = 0;
+  int curr_row = 1;
+  int curr_col = 1;
   for (unsigned int index = 0; index < board->height * board->width; index++) {
     /* If the cell has been PRINTED, print it again */
+    wmove(win, curr_row, curr_col);
     if (!PRINTED(board, index)) {
       print_cell_contents(win, board, index);
       SET_PRINTED(board, index);
     }
+    curr_col += 3;
 
     /* Move down to the next row to print */
     if (!((index + 1) % board->width)) {
       wmove(win, ++curr_row, 1);
+      curr_col=1;
       wrefresh(win);
     }
   }
+}
+
+void print_debug_box(WINDOW* win, void *opaque) {
+  GameBoard_T* board = (GameBoard_T*)opaque;
+  wmove(win, 1, 1);
+  unsigned int index = board->current_cell;
+  wprintw(win, "Current index: %d", index);
+  wmove(win, 2, 1);
+  wprintw(win, "Current Cell: num_bombs=%d, has_bomb=%d, uncovered=%d, flagged=%d, printed=%d", 
+                NUMBOMBS(board, index), 
+                HASBOMB(board, index) >> 4,
+                UNCOVERED(board, index) >> 5, 
+                FLAGGED(board, index) >> 6, 
+                PRINTED(board, index) >> 7);
+  wrefresh(win);
 }
 
 // void print_boarder(WINDOW* win, VOID *opaque) {
@@ -601,13 +620,14 @@ int terminal_setup(GameBoard_T* board, unsigned int rows, unsigned int columns) 
   /* Create the panels and their windows */
   /* (bottom) stdstr -> background -> headers -> gameboard (top) */
   // TODO: Support scroling
-  board->pm = pm_init(3);
+  board->pm = pm_init(5);
   int yalign = maxy/2 - rows/2;
   int xalign = maxx/2 - (columns*CELL_STR_LEN)/2;
   /* +2 for boarder */
   // pm_panel_init(board->pm, 0, 0, maxy, maxx, "background", NULL, NULL, NULL);
   pm_panel_init(board->pm, 0, 0, 5, columns*CELL_STR_LEN+2, "headers", print_headers, NULL, NULL);
   pm_panel_init(board->pm, 3, 0, rows+2, columns*CELL_STR_LEN+2, "gameboard", print_board, NULL, NULL);
+  pm_panel_init(board->pm, rows+4, 0, 5, columns*CELL_STR_LEN+2, "debug", print_debug_box, NULL, NULL);
   update_panels();
   doupdate();
 
