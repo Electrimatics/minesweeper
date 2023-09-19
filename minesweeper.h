@@ -33,6 +33,82 @@
 #define CELL_HASBOMB_STR "[B]"
 #endif
 
+typedef enum GameState {
+  GAME_INIT,
+  BOARD_GENERATION,
+  BOMB_GENERATION,
+  TURNS,
+  EXPLODE,
+  QUIT,
+  TIMEOUT,
+  WIN,
+  CLEANUP,
+} GameState_T;
+
+/* Assume NONE = 0 */
+#define NONE 0
+typedef enum CellAction {
+  MOVE = 1,
+  UNCOVER,
+  FLAG,
+  EXIT,
+} CellAction_T;
+
+typedef enum PrintAction {
+  CELL_UPDATE = 1,
+  HEADER_UPDATE,
+  BOARD_REFRESH
+} PrintAction_T;
+
+/* board (uint8_t) bitfields
+  +------------+---+---+---+---+
+  | 7 | 6 | 5 | 4 |    3-0     |
+  +------------+---+---+---+---+
+  7: Cell updates printed (0 means need print)
+  6: Flagged
+  5: Uncovered
+  4: Has bomb
+  3-0: Number of surronding bombs (0-8)
+     : When backtracking: Incoming direction
+        0 = UP
+        1 = UP_RIGHT
+        2 = RIGHT
+        3 = DOWN_RIGHT
+        4 = DOWN
+        5 = DOWN_LEFT
+        6 = LEFT
+        7 = UP_LEFT
+*/
+#define CELL_PRINTED_BIT (1 << 7)
+#define CELL_FLAGGED_BIT (1 << 6)
+#define CELL_UNCOVERED_BIT (1 << 5)
+#define CELL_HASBOMB_BIT (1 << 4)
+#define CELL_NUMBOMBS_BITS (0x0f)
+#define CELL_BACKTRACK_BITS (0x0f)
+
+typedef struct GameBoard {
+  PanelManager_T *pm;
+  GameState_T game_state;
+  PrintAction_T print_action;
+  uint8_t *board;
+  unsigned int height;
+  unsigned int width;
+  unsigned int current_cell;
+  unsigned int numBombs;
+  unsigned int reamining;
+  unsigned seconds_remaining;
+  int timeout;
+} GameBoard_T;
+
+/* Based on: https://stackoverflow.com/a/12923949 */
+typedef enum {
+  STR2INT_SUCCESS = 0,
+  STR2INT_OVERFLOW,
+  STR2INT_UNDERFLOW,
+  STR2INT_INCONVERTIBLE,
+  STR2INT_EMPTY,
+} str2int_errno;
+
 #define PRINT_CELL_WITH_COLOR(win, color, prints)                                   \
   wattron(win, COLOR_PAIR(color));                                                   \
   prints;                                                                      \
@@ -79,6 +155,7 @@
 
 /* Gameboard adjacent cell indexing macros */
 // Gets the surronding indexes at the provided index if they exist, -1 otherwise
+#define NUM_DIRECTIONS = 8
 #define UP(board, index)                                                      \
   (INDEX_IN_ROW(board, index - board->width, (index / board->width) - 1))
 #define UPLEFT(board, index)                                                  \
@@ -95,6 +172,40 @@
   (INDEX_IN_ROW(board, index + 1, index / board->width))
 #define UPRIGHT(board, index)                                                 \
   (INDEX_IN_ROW(board, index - board->width + 1, (index / board->width) - 1))
+
+typedef unsigned int (*move_cell_func)(GameBoard_T* board, unsigned int index);
+
+static inline unsigned int _move_up(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index - board->width, (index / board->width) - 1);
+}
+
+static inline unsigned int _move_upleft(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index - board->width - 1, (index / board->width) - 1);
+}
+
+static inline unsigned int _move_left(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index - 1, index / board->width);
+}
+
+static inline unsigned int _move_downleft(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index + board->width - 1, (index / board->width) + 1);
+}
+
+static inline unsigned int _move_down(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index + board->width, (index / board->width) + 1);
+}
+
+static inline unsigned int _move_downright(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index + board->width + 1, (index / board->width) + 1);
+}
+
+static inline unsigned int _move_right(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index + 1, index / board->width);
+}
+
+static inline unsigned int _move_upright(GameBoard_T* board, unsigned int index) {
+    return INDEX_IN_ROW(board, index - board->width + 1, (index / board->width) - 1);
+}
 
 #define SURRONDING_CELL_ACTION(board, index, ACTION)                          \
   ACTION(board, UP(board, index));                                           \
@@ -171,89 +282,12 @@
 #define SET_BACKTRACK_DIR(board, index, val)                                  \
   CLEAR_BACKTRACK_DIR(board, index);                                          \
   KNOWN_CELL(board, index) |= ((val & 0x03) << 6)
-#define CLEAR_BACKTRACK_DIR(board, index) (KNOWN_CELL(board, index) &= ~0xc0)
-#define BACKTRACK_DIR(board, index) ((CELL(board, index) & 0xc0) >> 6)
+#define CLEAR_BACKTRACK_DIR(board, index) (KNOWN_CELL(board, index) &= ~0x0f)
+#define BACKTRACK_DIR(board, index) ((CELL(board, index) & 0x0f))
 #define BT_UP 0
 #define BT_DOWN 1
 #define BT_RIGHT 2
 #define BT_LEFT 3
 
-#define UNCOVER_BLOCK_CONDITION(board, index, DIR)                            \
-  (DIR(board, index) != -1 && !NUMBOMBS(board, DIR(board, index)) &&           \
-   !UNCOVERED(board, DIR(board, index)))
-
-typedef enum GameState {
-  GAME_INIT,
-  BOARD_GENERATION,
-  BOMB_GENERATION,
-  TURNS,
-  EXPLODE,
-  QUIT,
-  TIMEOUT,
-  WIN,
-  CLEANUP,
-} GameState_T;
-
-/* Assume NONE = 0 */
-#define NONE 0
-typedef enum CellAction {
-  MOVE = 1,
-  UNCOVER,
-  FLAG,
-  EXIT,
-} CellAction_T;
-
-typedef enum PrintAction {
-  CELL_UPDATE = 1,
-  HEADER_UPDATE,
-  BOARD_REFRESH
-} PrintAction_T;
-
-/* board (uint8_t) bitfields
-  +------------+---+---+---+---+
-  | 7 | 6 | 5 | 4 |    3-0     |
-  +------------+---+---+---+---+
-  7: Cell updates printed (0 means need print)
-  6: Flagged
-  5: Uncovered
-  4: Has bomb
-  3-0: Number of surronding bombs (0-8)
-     : When backtracking: Incoming direction
-        0 = UP
-        1 = UP_RIGHT
-        2 = RIGHT
-        3 = DOWN_RIGHT
-        4 = DOWN
-        5 = DOWN_LEFT
-        6 = LEFT
-        7 = UP_LEFT
-*/
-#define CELL_PRINTED_BIT (1 << 7)
-#define CELL_FLAGGED_BIT (1 << 6)
-#define CELL_UNCOVERED_BIT (1 << 5)
-#define CELL_HASBOMB_BIT (1 << 4)
-#define CELL_NUMBOMBS_BITS (0x0f)
-#define CELL_BACKTRACK_BITS (0x0f)
-
-typedef struct GameBoard {
-  PanelManager_T *pm;
-  GameState_T game_state;
-  PrintAction_T print_action;
-  uint8_t *board;
-  unsigned int height;
-  unsigned int width;
-  unsigned int current_cell;
-  unsigned int numBombs;
-  unsigned int reamining;
-  unsigned seconds_remaining;
-  int timeout;
-} GameBoard_T;
-
-/* Based on: https://stackoverflow.com/a/12923949 */
-typedef enum {
-  STR2INT_SUCCESS = 0,
-  STR2INT_OVERFLOW,
-  STR2INT_UNDERFLOW,
-  STR2INT_INCONVERTIBLE,
-  STR2INT_EMPTY,
-} str2int_errno;
+#define UNCOVER_BLOCK_CONDITION(board, index)                            \
+  (!NUMBOMBS(board, index) && !UNCOVERED(board, index))
