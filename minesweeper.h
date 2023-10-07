@@ -70,13 +70,13 @@ typedef enum PrintAction {
   4: Has bomb
   3-0: Number of surronding bombs (0-8)
      : When backtracking: Incoming direction
-        0 = UP
+        0 = _move_up
         1 = UP_RIGHT
-        2 = RIGHT
+        2 = _move_right
         3 = DOWN_RIGHT
-        4 = DOWN
+        4 = _move_down
         5 = DOWN_LEFT
-        6 = LEFT
+        6 = _move_left
         7 = UP_LEFT
 */
 #define CELL_PRINTED_BIT (1 << 7)
@@ -148,104 +148,85 @@ typedef enum {
 #define KNOWN_CELL(board, index) (*(board->board + index))
 
 // Returns the index if it is in the expected row, -1 otherwise
-#define INDEX_IN_ROW(board, index, row)                                       \
-  ((CELL_BOUND_CHECK(board, index) && ((index) / board->width) == (row))     \
-       ? (index)                                                               \
-       : INVALID_INDEX)
+#define INDEX_BOUND_CHECK(board, index)                                       \
+  ((CELL_BOUND_CHECK(board, index)) ? index : INVALID_INDEX)
 
 /* Gameboard adjacent cell indexing macros */
 // Gets the surronding indexes at the provided index if they exist, -1 otherwise
-#define NUM_DIRECTIONS = 8
-#define UP(board, index)                                                      \
-  (INDEX_IN_ROW(board, index - board->width, (index / board->width) - 1))
-#define UPLEFT(board, index)                                                  \
-  (INDEX_IN_ROW(board, index - board->width - 1, (index / board->width) - 1))
-#define LEFT(board, index)                                                    \
-  (INDEX_IN_ROW(board, index - 1, index / board->width))
-#define DOWNLEFT(board, index)                                                \
-  (INDEX_IN_ROW(board, index + board->width - 1, (index / board->width) + 1))
-#define DOWN(board, index)                                                    \
-  (INDEX_IN_ROW(board, index + board->width, (index / board->width) + 1))
-#define DOWNRIGHT(board, index)                                               \
-  (INDEX_IN_ROW(board, index + board->width + 1, (index / board->width) + 1))
-#define RIGHT(board, index)                                                   \
-  (INDEX_IN_ROW(board, index + 1, index / board->width))
-#define UPRIGHT(board, index)                                                 \
-  (INDEX_IN_ROW(board, index - board->width + 1, (index / board->width) - 1))
-
+#define NUM_DIRECTIONS 8 
 typedef unsigned int (*move_cell_func)(GameBoard_T* board, unsigned int index);
-
+ 
 static inline unsigned int _move_up(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index - board->width, (index / board->width) - 1);
+    return INDEX_BOUND_CHECK(board, index - board->width);
 }
 
 static inline unsigned int _move_upleft(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index - board->width - 1, (index / board->width) - 1);
+    return INDEX_BOUND_CHECK(board, index - board->width - 1);
 }
 
 static inline unsigned int _move_left(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index - 1, index / board->width);
+    return INDEX_BOUND_CHECK(board, index - 1);
 }
 
 static inline unsigned int _move_downleft(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index + board->width - 1, (index / board->width) + 1);
+    return INDEX_BOUND_CHECK(board, index + board->width - 1);
 }
 
 static inline unsigned int _move_down(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index + board->width, (index / board->width) + 1);
+    return INDEX_BOUND_CHECK(board, index + board->width);
 }
 
 static inline unsigned int _move_downright(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index + board->width + 1, (index / board->width) + 1);
+    return INDEX_BOUND_CHECK(board, index + board->width + 1);
 }
 
 static inline unsigned int _move_right(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index + 1, index / board->width);
+    return INDEX_BOUND_CHECK(board, index + 1);
 }
 
 static inline unsigned int _move_upright(GameBoard_T* board, unsigned int index) {
-    return INDEX_IN_ROW(board, index - board->width + 1, (index / board->width) - 1);
-}
+    return INDEX_BOUND_CHECK(board, index - board->width + 1);
+} 
 
 #define SURRONDING_CELL_ACTION(board, index, ACTION)                          \
-  ACTION(board, UP(board, index));                                           \
-  ACTION(board, UPLEFT(board, index));                                       \
-  ACTION(board, LEFT(board, index));                                         \
-  ACTION(board, DOWNLEFT(board, index));                                     \
-  ACTION(board, DOWN(board, index));                                         \
-  ACTION(board, DOWNRIGHT(board, index));                                    \
-  ACTION(board, RIGHT(board, index));                                        \
-  ACTION(board, UPRIGHT(board, index))
+  ACTION(board, _move_up(board, index));                                           \
+  ACTION(board, _move_upleft(board, index));                                       \
+  ACTION(board, _move_left(board, index));                                         \
+  ACTION(board, _move_downleft(board, index));                                     \
+  ACTION(board, _move_down(board, index));                                         \
+  ACTION(board, _move_downright(board, index));                                    \
+  ACTION(board, _move_right(board, index));                                        \
+  ACTION(board, _move_upright(board, index))
 
 //TODO: Switch if statements with (ACTION & (state & position))
 #define SURRONDING_CELL_ACTION_STATEFUL(board, index, state, ACTION)          \
   if (state & 0x80)                                                            \
-    ACTION(board, UP(board, index));                                         \
+    ACTION(board, _move_up(board, index));                                         \
   if (state & 0x40)                                                            \
-    ACTION(board, UPLEFT(board, index));                                     \
+    ACTION(board, _move_upleft(board, index));                                     \
   if (state & 0x20)                                                            \
-    ACTION(board, LEFT(board, index));                                       \
+    ACTION(board, _move_left(board, index));                                       \
   if (state & 0x10)                                                            \
-    ACTION(board, DOWNLEFT(board, index));                                   \
+    ACTION(board, _move_downleft(board, index));                                   \
   if (state & 0x08)                                                            \
-    ACTION(board, DOWN(board, index));                                       \
+    ACTION(board, _move_down(board, index));                                       \
   if (state & 0x04)                                                            \
-    ACTION(board, DOWNRIGHT(board, index));                                  \
+    ACTION(board, _move_downright(board, index));                                  \
   if (state & 0x02)                                                            \
-    ACTION(board, RIGHT(board, index));                                      \
+    ACTION(board, _move_right(board, index));                                      \
   if (state & 0x01)                                                            \
-  ACTION(board, UPRIGHT(board, index))
+  ACTION(board, _move_upright(board, index))
 
 // Checks the surronding cells for a provided state
 #define SURRONDING_CELL_STATE(board, index, STATE)                            \
-  (STATE(board, UP(board, index)) << 7 |                                     \
-   STATE(board, UPLEFT(board, index)) << 6 |                                 \
-   STATE(board, LEFT(board, index)) << 5 |                                   \
-   STATE(board, DOWNLEFT(board, index)) << 4 |                               \
-   STATE(board, DOWN(board, index)) << 3 |                                   \
-   STATE(board, DOWNRIGHT(board, index)) << 2 |                              \
-   STATE(board, RIGHT(board, index)) << 1 |                                  \
-   STATE(board, UPRIGHT(board, index)))
+  (STATE(board, _move_up(board, index)) << 7 |                                     \
+   STATE(board, _move_upleft(board, index)) << 6 |                                 \
+   STATE(board, _move_left(board, index)) << 5 |                                   \
+   STATE(board, _move_downleft(board, index)) << 4 |                               \
+   STATE(board, _move_down(board, index)) << 3 |                                   \
+   STATE(board, _move_downright(board, index)) << 2 |                              \
+   STATE(board, _move_right(board, index)) << 1 |                                  \
+   STATE(board, _move_upright(board, index)))
 
 //TODO: Write portable routine
 /* This is not portable, but it is fast */

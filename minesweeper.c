@@ -100,22 +100,22 @@ CellAction_T do_cell_action(GameBoard_T* board) {
 
   /* Move up a cell */
   case KEY_UP:
-    pending_index = UP(board, board->current_cell);
+    pending_index = _move_up(board, board->current_cell);
     break;
 
   /* Move down a cell */
   case KEY_DOWN:
-    pending_index = DOWN(board, board->current_cell);
+    pending_index = _move_down(board, board->current_cell);
     break;
 
   /* Move right a cell */
   case KEY_RIGHT:
-    pending_index = RIGHT(board, board->current_cell);
+    pending_index = _move_right(board, board->current_cell);
     break;
 
   /* Move left a cell */
   case KEY_LEFT:
-    pending_index = LEFT(board, board->current_cell);
+    pending_index = _move_left(board, board->current_cell);
     break;
 
   /* Do nothing */
@@ -258,14 +258,17 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
     board->reamining -= newly_uncovered;
 
     /* Go through each direction and see if we need to uncover that cell */
-    for(uint8_t direction = 0; direction < 8; direction++) {
-      next_index = MOVE_CELL_ACTIONS[direction](board, index);
+    uint8_t dir = 0;
+    for(dir = 0; dir < NUM_DIRECTIONS; dir++) {
+      next_index = MOVE_CELL_ACTIONS[dir](board, index);
       if (next_index != -1 && UNCOVER_BLOCK_CONDITION(board, next_index)) {
         index = next_index;
-        SET_BACKTRACK_DIR(board, index, (direction += 0xf));
-        continue;
+        SET_BACKTRACK_DIR(board, index, (dir += 0xf));
+        break;
       }
     }
+
+    if (dir != NUM_DIRECTIONS) continue;
 
     /* Backtrack */
     if (index != start_index) {
