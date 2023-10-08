@@ -138,18 +138,21 @@ typedef enum {
 #define CELL_COL_CURSOR(board, index) (CELL_COL(board, index)*CELL_STR_LEN)
 
 // Checks if a cell index is within the bounds of the gameboard.
-#define CELL_BOUND_CHECK(board, index) ((unsigned int)index < board->width * board->height)
+#define BOARD_BOUND_CHECK(board, index) ((unsigned int)index < board->width * board->height)
 
 // Return a cell's contents if it's in the gameboard, default cell otherwise
 #define CELL(board, index)                                                    \
-  (CELL_BOUND_CHECK(board, index) ? *(board->board + index) : DEFAULT_CELL)
+  (BOARD_BOUND_CHECK(board, index) ? *(board->board + index) : DEFAULT_CELL)
 
 // Gets the contents of a cell without checking the index. Used when cell content needs to be modified
 #define KNOWN_CELL(board, index) (*(board->board + index))
 
 // Returns the index if it is in the expected row, -1 otherwise
 #define INDEX_BOUND_CHECK(board, index)                                       \
-  ((CELL_BOUND_CHECK(board, index)) ? index : INVALID_INDEX)
+  ((BOARD_BOUND_CHECK(board, index)) ? index : INVALID_INDEX)
+
+#define INDEX_ROW_CHECK(board, index, new_index)                               \
+  ((BOARD_BOUND_CHECK(board, new_index) && index / board->width == new_index / board->width) ? new_index : INVALID_INDEX)
 
 /* Gameboard adjacent cell indexing macros */
 // Gets the surronding indexes at the provided index if they exist, -1 otherwise
@@ -161,15 +164,15 @@ static inline unsigned int _move_up(GameBoard_T* board, unsigned int index) {
 }
 
 static inline unsigned int _move_upleft(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index - board->width - 1);
+    return INDEX_ROW_CHECK(board, index, index - board->width - 1);
 }
 
 static inline unsigned int _move_left(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index - 1);
+    return INDEX_ROW_CHECK(board, index, index - 1);
 }
 
 static inline unsigned int _move_downleft(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index + board->width - 1);
+    return INDEX_ROW_CHECK(board, index, index + board->width - 1);
 }
 
 static inline unsigned int _move_down(GameBoard_T* board, unsigned int index) {
@@ -177,15 +180,15 @@ static inline unsigned int _move_down(GameBoard_T* board, unsigned int index) {
 }
 
 static inline unsigned int _move_downright(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index + board->width + 1);
+    return INDEX_ROW_CHECK(board, index, index + board->width + 1);
 }
 
 static inline unsigned int _move_right(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index + 1);
+    return INDEX_ROW_CHECK(board, index, index + 1);
 }
 
 static inline unsigned int _move_upright(GameBoard_T* board, unsigned int index) {
-    return INDEX_BOUND_CHECK(board, index - board->width + 1);
+    return INDEX_ROW_CHECK(board, index, index - board->width + 1);
 } 
 
 #define SURRONDING_CELL_ACTION(board, index, ACTION)                          \
@@ -262,7 +265,7 @@ static inline unsigned int _move_upright(GameBoard_T* board, unsigned int index)
 
 #define SET_BACKTRACK_DIR(board, index, val)                                  \
   CLEAR_BACKTRACK_DIR(board, index);                                          \
-  KNOWN_CELL(board, index) |= ((val & 0x03) << 6)
+  KNOWN_CELL(board, index) |= (val & 0x0f)
 #define CLEAR_BACKTRACK_DIR(board, index) (KNOWN_CELL(board, index) &= ~0x0f)
 #define BACKTRACK_DIR(board, index) ((CELL(board, index) & 0x0f))
 #define BT_UP 0

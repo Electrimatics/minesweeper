@@ -124,7 +124,7 @@ CellAction_T do_cell_action(GameBoard_T* board) {
     break;
   }
 
-  if (CELL_BOUND_CHECK(board, pending_index)) {
+  if (BOARD_BOUND_CHECK(board, pending_index)) {
     board->current_cell = pending_index;
     action = MOVE;
   }
@@ -240,6 +240,7 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
     if (!UNCOVERED(board, index)) {
       SET_UNCOVERED(board, index);
       CLEAR_PRINTED(board, index);
+      board->current_cell = index;
       board->reamining--;
     }
 
@@ -261,21 +262,29 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
     uint8_t dir = 0;
     for(dir = 0; dir < NUM_DIRECTIONS; dir++) {
       next_index = MOVE_CELL_ACTIONS[dir](board, index);
-      if (next_index != -1 && UNCOVER_BLOCK_CONDITION(board, next_index)) {
+      if (next_index != INVALID_INDEX && UNCOVER_BLOCK_CONDITION(board, next_index)) {
         index = next_index;
-        SET_BACKTRACK_DIR(board, index, (dir += 0xf));
+        uint8_t new_dir = (dir+NUM_DIRECTIONS/2) % NUM_DIRECTIONS;
+        SET_BACKTRACK_DIR(board, index, new_dir);
         break;
       }
     }
 
+    pm_panel_draw_all(board->pm, (void*)board);
+    getch();
+    /* Moving cells, do not backtrack yet */
     if (dir != NUM_DIRECTIONS) continue;
 
     /* Backtrack */
     if (index != start_index) {
       prev_index = index;
-      uint8_t bt_dir = (BACKTRACK_DIR(board, index)+0xf) & 0x7;
+      uint8_t bt_dir = (BACKTRACK_DIR(board, index)+NUM_DIRECTIONS/2) % NUM_DIRECTIONS;
       index = MOVE_CELL_ACTIONS[bt_dir](board, index);
-      CLEAR_BACKTRACK_DIR(board, prev_index);
+      int surrondingBombs = SURRONDING_CELL_STATE(board, prev_index, HASBOMB);
+      int numBombs;
+      COUNT_BITS(numBombs, surrondingBombs);
+      SET_NUMBOMBS(board, prev_index, numBombs);
+      CLEAR_PRINTED(board, prev_index);
     }
   } while (index != start_index);
 }
