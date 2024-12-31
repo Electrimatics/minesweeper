@@ -1,227 +1,39 @@
+#include <bits/time.h>
 #include <ctype.h>
 #include <curses.h>
 #include <errno.h>
 #include <limits.h>
 #include <locale.h>
 #include <ncurses.h>
+#include <panel.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-/* Cell display macros */
-#define CELL_COVERED 1
-#define CELL_SELECTED 2
-#define CELL_FLAGGED 3
-#define CELL_UNCOVERED 4
-#define CELL_CONTAINS_BOMB 5
-#define CELL_BACKTRACTED 6
+#include "minesweeper.h"
 
-#define CELL_COVERED_STR "   "
-#define CELL_SELECTED_STR "\u2591\u2591\u2591"
-#define CELL_FLAGGED_STR " \u2691 "
-#define CELL_UNCOVERED_STR " %c "
-#define CELL_HASBOMB_STR " \U0001F4A3 "
+const char *GameStateStr[] = {"Generating game...", "Creating board... ", "Placing bombs...  ",
+                              "Make an action!   ", "Bomb exploded!    ", "Game exited       ",
+                              "Timer expired     ", "Congratulations!  ", "Cleaning up...    "};
 
-#define PRINT_CELL_WITH_COLOR(color, prints)                                   \
-  attron(COLOR_PAIR(color));                                                   \
-  prints;                                                                      \
-  attroff(COLOR_PAIR(color))
-
-// #define CELL_COVERED  "\x1B[47m" _COVERED "\x1B[0m"
-// #define CELL_SELECTED "\x1B[42m" _SELECTED "\x1B[0m"
-// #define CELL_FLAGGED  "\x1B[41m" _FLAGGED "\x1B[0m"
-// #define CELL_UNCOVERED  "\x1B[0m" _UNCOVERED "\x1B[0m"
-
-/* Input capture macru2592os */
-#define ARROW_UP 'A'
-#define ARROW_DOWN 'B'
-#define ARROW_RIGHT 'C'
-#define ARROW_LEFT 'D'
-
-/* Gameboard cell indexing macros */
-// Converts a (row, col) index into a one-dimensional offset
-// #define INDEX(gboard, row, col)          ((row*gboard->width)+col)
-
-// Default cell: No surronding bombs, does not have bomb, uncovered, not flagged
-#define DEFAULT_CELL (0b00100000)
-
-// Invalid index: -1 (0xFFFF...) when unsigned
-#define INVALID_INDEX (-1)
-
-// Checks if a cell index is within the bounds of the gameboard
-#define CELL_BOUND_CHECk(gboard, index) (index < gboard->width * gboard->height)
-
-// Return a cell's contents if it's in the gameboard, default cell otherwise
-#define CELL(gboard, index)                                                    \
-  (CELL_BOUND_CHECk(gboard, index) ? *(gboard->board + index) : DEFAULT_CELL)
-
-// Gets the contents of a cell without checking the index. Used by other macros
-#define KNOWN_CELL(gboard, index) (*(gboard->board + index))
-
-// Returns the index if it is in the expected row, -1 otherwise
-#define INDEX_IN_ROW(gboard, index, row)                                       \
-  ((CELL_BOUND_CHECk(gboard, index) && ((index) / gboard->width) == (row))     \
-       ? (index)                                                               \
-       : INVALID_INDEX)
-
-/* Gameboard adjacent cell indexing macros */
-// Gets the surronding indexes at the provided index if they exist, -1 otherwise
-#define UP(gboard, index)                                                      \
-  (INDEX_IN_ROW(gboard, index - gboard->width, (index / gboard->width) - 1))
-#define UPLEFT(gboard, index)                                                  \
-  (INDEX_IN_ROW(gboard, index - gboard->width - 1, (index / gboard->width) - 1))
-#define LEFT(gboard, index)                                                    \
-  (INDEX_IN_ROW(gboard, index - 1, index / gboard->width))
-#define DOWNLEFT(gboard, index)                                                \
-  (INDEX_IN_ROW(gboard, index + gboard->width - 1, (index / gboard->width) + 1))
-#define DOWN(gboard, index)                                                    \
-  (INDEX_IN_ROW(gboard, index + gboard->width, (index / gboard->width) + 1))
-#define DOWNRIGHT(gboard, index)                                               \
-  (INDEX_IN_ROW(gboard, index + gboard->width + 1, (index / gboard->width) + 1))
-#define RIGHT(gboard, index)                                                   \
-  (INDEX_IN_ROW(gboard, index + 1, index / gboard->width))
-#define UPRIGHT(gboard, index)                                                 \
-  (INDEX_IN_ROW(gboard, index - gboard->width + 1, (index / gboard->width) - 1))
-
-#define SURRONDING_CELL_ACTION(gboard, index, ACTION)                          \
-  ACTION(gboard, UP(gboard, index));                                           \
-  ACTION(gboard, UPLEFT(gboard, index));                                       \
-  ACTION(gboard, LEFT(gboard, index));                                         \
-  ACTION(gboard, DOWNLEFT(gboard, index));                                     \
-  ACTION(gboard, DOWN(gboard, index));                                         \
-  ACTION(gboard, DOWNRIGHT(gboard, index));                                    \
-  ACTION(gboard, RIGHT(gboard, index));                                        \
-  ACTION(gboard, UPRIGHT(gboard, index))
-
-#define SURRONDING_CELL_ACTION_STATEFUL(gboard, index, state, ACTION)          \
-  if (state & 0x80)                                                            \
-    ACTION(gboard, UP(gboard, index));                                         \
-  if (state & 0x40)                                                            \
-    ACTION(gboard, UPLEFT(gboard, index));                                     \
-  if (state & 0x20)                                                            \
-    ACTION(gboard, LEFT(gboard, index));                                       \
-  if (state & 0x10)                                                            \
-    ACTION(gboard, DOWNLEFT(gboard, index));                                   \
-  if (state & 0x08)                                                            \
-    ACTION(gboard, DOWN(gboard, index));                                       \
-  if (state & 0x04)                                                            \
-    ACTION(gboard, DOWNRIGHT(gboard, index));                                  \
-  if (state & 0x02)                                                            \
-    ACTION(gboard, RIGHT(gboard, index));                                      \
-  if (state & 0x01)                                                            \
-  ACTION(gboard, UPRIGHT(gboard, index))
-
-// Checks the surronding cells for a provided state
-#define SURRONDING_CELL_STATE(gboard, index, STATE)                            \
-  (STATE(gboard, UP(gboard, index)) << 7 |                                     \
-   STATE(gboard, UPLEFT(gboard, index)) << 6 |                                 \
-   STATE(gboard, LEFT(gboard, index)) << 5 |                                   \
-   STATE(gboard, DOWNLEFT(gboard, index)) << 4 |                               \
-   STATE(gboard, DOWN(gboard, index)) << 3 |                                   \
-   STATE(gboard, DOWNRIGHT(gboard, index)) << 2 |                              \
-   STATE(gboard, RIGHT(gboard, index)) << 1 |                                  \
-   STATE(gboard, UPRIGHT(gboard, index)))
-
-/* This is not portable, but it is fast */
-#define COUNT_BITS(result, source)                                             \
-  __asm__ __volatile__("popcnt %0, %1;" : "=r"(result) : "r"(source))
-// #define COUNT_BITS(result, number)  for(int i = 0; i < sizeof(number); i++) { \
-//                                       (result) += (number & 0x01); \
-//                                     }
-
-/* Cell state query and modification macros */
-#define SET_NUMBOMBS(gboard, index, num)                                       \
-  CLEAR_NUMBOMBS(gboard, index);                                               \
-  KNOWN_CELL(gboard, index) |= (num)
-#define CLEAR_NUMBOMBS(gboard, index) (KNOWN_CELL(gboard, index) &= ~0x0f)
-#define NUMBOMBS(gboard, index) (CELL(gboard, index) & 0X0f)
-#define ADJACENTBOMB(gboard, index) ((CELL(gboard, index) & 0x0f) > 0)
-
-#define SET_HASBOMB(gboard, index) (KNOWN_CELL(gboard, index) |= 0x10)
-#define CLEAR_HASBOMB(gboard, index) (KNOWN_CELL(gboard, index) &= ~0x10)
-#define HASBOMB(gboard, index) ((CELL(gboard, index) & 0x10) >> 4)
-
-#define SET_UNCOVERED(gboard, index) (KNOWN_CELL(gboard, index) |= 0x20)
-#define CLEAR_UNCOVERED(gboard, index) (KNOWN_CELL(gboard, index) &= ~0x20)
-#define UNCOVERED(gboard, index) ((CELL(gboard, index) & 0x20) >> 5)
-
-#define SET_FLAGGED(gboard, index) (KNOWN_CELL(gboard, index) |= 0x40)
-#define CLEAR_FLAGGED(gboard, index) (KNOWN_CELL(gboard, index) &= ~0x40)
-#define FLAGGED(gboard, index) ((CELL(gboard, index) & 0x40) >> 6)
-
-#define SET_BACKTRACK_DIR(gboard, index, val)                                  \
-  CLEAR_BACKTRACK_DIR(gboard, index);                                          \
-  KNOWN_CELL(gboard, index) |= ((val & 0x03) << 6)
-#define CLEAR_BACKTRACK_DIR(gboard, index) (KNOWN_CELL(gboard, index) &= ~0xc0)
-#define BACKTRACK_DIR(gboard, index) ((CELL(gboard, index) & 0xc0) >> 6)
-#define BT_UP 0
-#define BT_DOWN 1
-#define BT_RIGHT 2
-#define BT_LEFT 3
-
-#define UNCOVER_BLOCK_CONDITION(gboard, index, DIR)                            \
-  (DIR(board, index) != -1 && !NUMBOMBS(board, DIR(board, index)) &&           \
-   !UNCOVERED(board, DIR(board, index)))
+move_cell_func MOVE_CELL_ACTIONS[8] = {_index_up,   _index_upleft,    _index_left,  _index_downleft,
+                                       _index_down, _index_downright, _index_right, _index_upright};
 
 // Num is assumed to be a uint8_t
-#define print_bits(num)                                                        \
-  {                                                                            \
-    uint8_t n = num & 0xFF;                                                    \
-    int c = 8;                                                                 \
-    while (c > 0) {                                                            \
-      printw("%c", (n & 0x80) ? '1' : '0');                                    \
-      n = n << 1;                                                              \
-      c--;                                                                     \
-    }                                                                          \
-    printw("\n");                                                              \
-    refresh();                                                                 \
+#define print_bits(num)                                                                                                \
+  {                                                                                                                    \
+    uint8_t n = num & 0xFF;                                                                                            \
+    int c = 8;                                                                                                         \
+    while (c > 0) {                                                                                                    \
+      printw("%c", (n & 0x80) ? '1' : '0');                                                                            \
+      n = n << 1;                                                                                                      \
+      c--;                                                                                                             \
+    }                                                                                                                  \
+    printw("\n");                                                                                                      \
+    refresh();                                                                                                         \
   }
-
-typedef enum GameState {
-  GAME_INIT,
-  BOARD_GENERATION,
-  BOMB_GENERATION,
-  TURNS,
-  EXPLODE,
-  TIMEOUT,
-  WIN,
-  CLEANUP
-} GameState_T;
-
-typedef enum CellAction {
-  NONE,
-  UNCOVER,
-  FLAG,
-} CellAction_T;
-
-/* board (uint8_t) bitfields:game_state
-  +------------+---+---+---+---+
-  |    0-3     | 4 | 5 | 6 | 7 |
-  +------------+---+---+---+---+
-  0-3: Number of surronding bombs (0-8)
-  4: Has bomb
-  5: Uncovered
-  6: Flagged
-  6-7: Backtrack direction
-*/
-typedef struct GameBoard {
-  uint8_t *board;
-  unsigned int height;
-  unsigned int width;
-  unsigned int numBombs;
-  unsigned int reamining;
-  GameState_T game_state;
-} GameBoard_T;
-
-/* Based on: https://stackoverflow.com/a/12923949 */
-typedef enum {
-  STR2INT_SUCCESS = 0,
-  STR2INT_OVERFLOW,
-  STR2INT_UNDERFLOW,
-  STR2INT_INCONVERTIBLE,
-  STR2INT_EMPTY,
-} str2int_errno;
 
 /**
  * @brief Convert string s to int out.
@@ -236,6 +48,7 @@ typedef enum {
  * @param base Base to interpret string in. Same range as strtol (2 to 36).
  * @return str2int_errno
  */
+// TODO: Replace this with a menu to increase the number of bombs
 str2int_errno str2int(unsigned int *out, char *s, int base) {
   char *end;
   if (s[0] == '\0' || isspace(s[0]))
@@ -253,277 +66,336 @@ str2int_errno str2int(unsigned int *out, char *s, int base) {
   return STR2INT_SUCCESS;
 }
 
-void select_cell(GameBoard_T *board, int *index) {
-  int pending_index = INVALID_INDEX;
+CellAction_T do_cell_action(GameBoard_T *board) {
+  CellAction_T action;
+  unsigned int pending_index = INVALID_INDEX;
+  struct timespec start, stop;
+
+  /* Get the start time and set the timeout for this action */
+  clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+  timeout(board->timeout);
   switch (getch()) {
-  case ARROW_UP:
-    pending_index = UP(board, *index);
+  /* Flag cell */
+  case 'f':
+  case 'F':
+    action = FLAG;
     break;
 
-  case ARROW_DOWN:
-    pending_index = DOWN(board, *index);
+  /* Uncover cell */
+  case 'u':
+  case 'U':
+    action = UNCOVER;
     break;
 
-  case ARROW_RIGHT:
-    pending_index = RIGHT(board, *index);
+  /* Exit game (ESC)*/
+  case 27:
+    action = EXIT;
     break;
 
-  case ARROW_LEFT:
-    pending_index = LEFT(board, *index);
+  /* Move up a cell */
+  case KEY_UP:
+    pending_index = _index_up(board, board->current_cell);
     break;
 
+  /* Move down a cell */
+  case KEY_DOWN:
+    pending_index = _index_down(board, board->current_cell);
+    break;
+
+  /* Move right a cell */
+  case KEY_RIGHT:
+    pending_index = _index_right(board, board->current_cell);
+    break;
+
+  /* Move left a cell */
+  case KEY_LEFT:
+    pending_index = _index_left(board, board->current_cell);
+    break;
+
+  /* Do nothing */
   default:
+    action = NONE;
     break;
   }
-  if (CELL_BOUND_CHECk(board, pending_index)) {
-    *index = pending_index;
+
+  if (BOARD_BOUND_CHECK(board, pending_index)) {
+    board->current_cell = pending_index;
+    action = MOVE;
   }
+
+  /* How long did this action take in ms? */
+  clock_gettime(CLOCK_MONOTONIC_RAW, &stop);
+  int diff = (stop.tv_sec - start.tv_sec) * 1000 + (stop.tv_nsec - start.tv_nsec) / 1000000;
+  board->timeout -= diff;
+
+  return action;
 }
 
-CellAction_T do_cell_action(GameBoard_T *board, int *index) {
-  while (1) {
-    switch (getch()) {
-    /* Flag cell */
-    case 'f':
-    case 'F':
-      return FLAG;
-
-    /* Uncover cell */
-    case 'u':
-    case 'U':
-      return UNCOVER;
-
-    /* Move to different cell */
-    case '\x1B':
-      // Skip the '['
-      getch();
-      select_cell(board, index);
-      return NONE;
-
-    default:
-      break;
-    }
-  }
+void print_headers(struct PanelData *self, void *opaque) {
+  GameBoard_T *board = (GameBoard_T *)opaque;
+  WINDOW *win = panel_window(self->panel);
+  wmove(win, 1, 1);
+  // waddstr(win, GameStateStr[board->game_state]);
+  // waddstr(win, "   ");
+  wprintw(win, "%03d", board->numFlags);
+  wmove(win, 1, pm_panel_get_width(self) - 3);
+  wprintw(win, "%03d", board->seconds_elapsed);
+  wrefresh(win);
 }
 
-void print_board(GameBoard_T *board, int select) {
-  // TODO: Center board + some other terminal validation
-  move(0, 0);
-  for (int index = 0; index < board->height * board->width; index++) {
-    if (select == index) {
-      attron(COLOR_PAIR(CELL_SELECTED));
-      addstr(CELL_SELECTED_STR);
-      attroff(COLOR_PAIR(CELL_SELECTED));
+void print_cell_contents(WINDOW *win, GameBoard_T *board, unsigned int index) {
+  if (board->current_cell == index) {
+    PRINT_CELL_WITH_COLOR(win, CELL_SELECTED, waddstr(win, CELL_SELECTED_STR));
 
-    } else if (UNCOVERED(board, index)) {
-      if (HASBOMB(board, index)) {
-        PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, addstr(CELL_HASBOMB_STR););
-      } else {
-        int bombs = NUMBOMBS(board, index);
-        printw(CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' ');
-      }
-
-    } else if (FLAGGED(board, index)) {
-      PRINT_CELL_WITH_COLOR(CELL_FLAGGED, addstr(CELL_FLAGGED_STR));
-
-    } else if (HASBOMB(board, index)) {
-      PRINT_CELL_WITH_COLOR(CELL_CONTAINS_BOMB, addstr(CELL_COVERED_STR));
-
+  } else if (UNCOVERED(board, index)) {
+    if (HASBOMB(board, index)) {
+      PRINT_CELL_WITH_COLOR(win, CELL_CONTAINS_BOMB, waddstr(win, CELL_HASBOMB_STR));
     } else {
-      PRINT_CELL_WITH_COLOR(CELL_COVERED, addstr(CELL_COVERED_STR));
+      int bombs = NUMBOMBS(board, index);
+      PRINT_CELL_WITH_COLOR(win, bombs, wprintw(win, CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' '););
     }
 
-    if (!((index + 1) % board->width)) {
-      addch('\n');
-      refresh();
-    }
+  } else if (FLAGGED(board, index)) {
+    PRINT_CELL_WITH_COLOR(win, CELL_FLAGGED, waddstr(win, CELL_FLAGGED_STR));
+
+#ifdef DEBUG
+  } else if (HASBOMB(board, index)) {
+    PRINT_CELL_WITH_COLOR(win, CELL_CONTAINS_BOMB, waddstr(win, CELL_COVERED_STR));
+#endif
+
+  } else {
+    PRINT_CELL_WITH_COLOR(win, CELL_COVERED, waddstr(win, CELL_COVERED_STR));
   }
-  printw("Current cell: ");
-  print_bits(CELL(board, select));
-  printw("\tNUMBOMBS: %d\tHASBOMB: %d\tUNCOVERED: %d\tFLAGGED: %d\n",
-         NUMBOMBS(board, select), HASBOMB(board, select),
-         UNCOVERED(board, select), FLAGGED(board, select));
-  printw("Remaining: %d\n", board->reamining);
 }
 
-void uncover_cell_block(GameBoard_T *board, int index) {
-  int start_index = index;
-  int prev_index = index;
+void print_board(struct PanelData *self, void *opaque) {
+  GameBoard_T *board = (GameBoard_T *)opaque;
+  WINDOW *win = panel_window(self->panel);
+  wmove(win, 1, 1);
+  int curr_row = 1;
+  int curr_col = 1;
+  for (unsigned int index = 0; index < board->height * board->width; index++) {
+    if (!PRINTED(board, index) || board->refresh_board_print) {
+      wmove(win, curr_row, curr_col);
+      print_cell_contents(win, board, index);
+      SET_PRINTED(board, index);
+    }
+    curr_col += 3;
+
+    /* Move down to the next row to print */
+    if (!((index + 1) % board->width)) {
+      wmove(win, ++curr_row, 1);
+      curr_col = 1;
+      wrefresh(win);
+    }
+  }
+}
+
+void print_debug_box(struct PanelData *self, void *opaque) {
+  GameBoard_T *board = (GameBoard_T *)opaque;
+  WINDOW *win = panel_window(self->panel);
+  wmove(win, 1, 1);
+  unsigned int index = board->current_cell;
+  wprintw(win, "Current index: %d [%d,%d]", index, CELL_ROW(board, index), CELL_COL(board, index));
+  wmove(win, 2, 1);
+  wprintw(win, "\tnum_bombs=%d\n\thas_bomb=%d\n\tuncovered=%d\n\tflagged=%d\n\tprinted=%d", NUMBOMBS(board, index),
+          HASBOMB(board, index) >> 4, UNCOVERED(board, index) >> 5, FLAGGED(board, index) >> 6,
+          PRINTED(board, index) >> 7);
+  wrefresh(win);
+}
+
+void uncover_cell_block(GameBoard_T *board, unsigned int index) {
+  unsigned int start_index = index;
+  unsigned int prev_index = index;
+  unsigned int next_index = -1;
 
   if (UNCOVERED(board, index)) {
     return;
   }
 
-  // Uncover only 1 cell if it has a bomb in it
-  if (NUMBOMBS(board, index)) {
+  // Uncover only 1 cell if it has a bomb in it or adjacent to it
+  if (NUMBOMBS(board, index) || HASBOMB(board, index)) {
     SET_UNCOVERED(board, index);
-    board->reamining--;
+    CLEAR_PRINTED(board, index);
+    board->remaining_open_cells--;
     return;
   }
 
-  // Traverse open space
+  /* Traverse the open space and use the numbomb bits to keep track of where we
+   * came from */
   do {
-    if (index == start_index) {
-      unsigned int dir_counter = BACKTRACK_DIR(board, start_index);
-      SET_BACKTRACK_DIR(board, start_index, dir_counter + 1);
-    }
-
     if (!UNCOVERED(board, index)) {
       SET_UNCOVERED(board, index);
-      board->reamining--;
+      CLEAR_PRINTED(board, index);
+      board->remaining_open_cells--;
     }
 
+    /* Figure out which cells have a bomb around it */
     int adjacent_bombs_bits = SURRONDING_CELL_STATE(board, index, ADJACENTBOMB);
-    int surronding_uncovered_bits =
-        SURRONDING_CELL_STATE(board, index, !UNCOVERED);
-    int newly_uncovered;
-    COUNT_BITS(newly_uncovered,
-               adjacent_bombs_bits & surronding_uncovered_bits);
+    int surronding_uncovered_bits = SURRONDING_CELL_STATE(board, index, !UNCOVERED);
 
-    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits,
-                                    SET_UNCOVERED);
-    board->reamining -= newly_uncovered;
-    print_board(board, index);
-    print_bits(adjacent_bombs_bits);
-    print_bits(surronding_uncovered_bits);
-    // printw("%d\n", newly_uncovered);
-    // getch();
+    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, SET_UNCOVERED);
+    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, CLEAR_PRINTED);
+    board->remaining_open_cells -= COUNT_BITS(adjacent_bombs_bits & surronding_uncovered_bits);
 
-    if (UNCOVER_BLOCK_CONDITION(board, index, UP)) {
-      index = UP(board, index);
-      SET_BACKTRACK_DIR(board, index, BT_DOWN);
-      continue;
-    }
-    if (UNCOVER_BLOCK_CONDITION(board, index, RIGHT)) {
-      index = RIGHT(board, index);
-      SET_BACKTRACK_DIR(board, index, BT_LEFT);
-      continue;
-    }
-    if (UNCOVER_BLOCK_CONDITION(board, index, DOWN)) {
-      index = DOWN(board, index);
-      SET_BACKTRACK_DIR(board, index, BT_UP);
-      continue;
-    }
-    if (UNCOVER_BLOCK_CONDITION(board, index, LEFT)) {
-      index = LEFT(board, index);
-      SET_BACKTRACK_DIR(board, index, BT_RIGHT);
-      continue;
-    }
-    if (index != start_index) {
-      prev_index = index;
-      switch (BACKTRACK_DIR(board, index)) {
-      case BT_UP:
-        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNRIGHT)) {
-          uncover_cell_block(board, DOWNRIGHT(board, index));
-        }
-        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNLEFT)) {
-          uncover_cell_block(board, DOWNLEFT(board, index));
-        }
-        index = UP(board, index);
-        break;
-
-      case BT_RIGHT:
-        if (UNCOVER_BLOCK_CONDITION(board, index, UPLEFT)) {
-          uncover_cell_block(board, UPLEFT(board, index));
-        }
-        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNLEFT)) {
-          uncover_cell_block(board, DOWNLEFT(board, index));
-        }
-        index = RIGHT(board, index);
-        break;
-
-      case BT_DOWN:
-        if (UNCOVER_BLOCK_CONDITION(board, index, UPLEFT)) {
-          uncover_cell_block(board, UPLEFT(board, index));
-        }
-        if (UNCOVER_BLOCK_CONDITION(board, index, UPRIGHT)) {
-          uncover_cell_block(board, UPRIGHT(board, index));
-        }
-        index = DOWN(board, index);
-        break;
-
-      case BT_LEFT:
-        if (UNCOVER_BLOCK_CONDITION(board, index, UPRIGHT)) {
-          uncover_cell_block(board, UPRIGHT(board, index));
-        }
-        if (UNCOVER_BLOCK_CONDITION(board, index, DOWNRIGHT)) {
-          uncover_cell_block(board, DOWNRIGHT(board, index));
-        }
-        index = LEFT(board, index);
-        break;
-
-      default:
+    /* Go through each direction and see if we need to uncover that cell */
+    uint8_t dir = 0;
+    for (dir = 0; dir < NUM_DIRECTIONS; dir++) {
+      next_index = MOVE_CELL_ACTIONS[dir](board, index);
+      if (next_index != INVALID_INDEX && UNCOVER_BLOCK_CONDITION(board, next_index)) {
+        index = next_index;
+        uint8_t bt_dir = (dir + NUM_DIRECTIONS / 2) % NUM_DIRECTIONS;
+        SET_BACKTRACK_DIR(board, index, bt_dir);
         break;
       }
-      CLEAR_BACKTRACK_DIR(board, prev_index);
     }
-  } while (BACKTRACK_DIR(board, start_index) != 3);
 
-  /* Do a final check on diagonals */
-  if (UNCOVER_BLOCK_CONDITION(board, index, UPRIGHT)) {
-    uncover_cell_block(board, UPRIGHT(board, index));
-  }
-  if (UNCOVER_BLOCK_CONDITION(board, index, DOWNRIGHT)) {
-    uncover_cell_block(board, DOWNRIGHT(board, index));
-  }
-  if (UNCOVER_BLOCK_CONDITION(board, index, DOWNLEFT)) {
-    uncover_cell_block(board, DOWNLEFT(board, index));
-  }
-  if (UNCOVER_BLOCK_CONDITION(board, index, UPLEFT)) {
-    uncover_cell_block(board, UPLEFT(board, index));
-  }
-  CLEAR_BACKTRACK_DIR(board, start_index);
+    /* Moving cells, do not backtrack yet */
+    if (dir != NUM_DIRECTIONS)
+      continue;
+
+    /* Backtrack */
+    if (index != start_index) {
+      prev_index = index;
+      index = MOVE_CELL_ACTIONS[BACKTRACK_DIR(board, index)](board, index);
+      int surrondingBombs = SURRONDING_CELL_STATE(board, prev_index, HASBOMB);
+      SET_NUMBOMBS(board, prev_index, COUNT_BITS(surrondingBombs));
+      CLEAR_PRINTED(board, prev_index);
+    }
+  } while (index != start_index);
 }
 
-GameState_T check_game_condition(GameBoard_T *board, int index) {
-  if (UNCOVERED(board, index) && HASBOMB(board, index)) {
+GameState_T update_game_condition(GameBoard_T *board, unsigned int index) {
+  if (board->game_state == QUIT) {
+    return QUIT;
+  } else if (UNCOVERED(board, index) && HASBOMB(board, index)) {
     return EXPLODE;
-  } else if (board->reamining == 0) {
+  } else if (board->remaining_open_cells == 0 && !board->is_first_turn) {
     return WIN;
   } else {
     return TURNS;
   }
 }
 
-void generate_board(GameBoard_T *board, int rows, int columns) {
-  board->height = rows;
-  board->width = columns;
-  board->board =
-      (uint8_t *)calloc(board->width * board->height, sizeof(uint8_t));
-  board->numBombs = 0;
-  board->reamining = 0;
-  board->game_state = BOARD_GENERATION;
+void gameboard_scene_init(GameBoard_T *board, int rows, int columns) {
+  int yalign = getmaxy(stdscr) / 2 - rows / 2;
+  int xalign = getmaxx(stdscr) / 2 - (columns * CELL_STR_LEN) / 2;
+
+  PanelScene_T *ps = pm_scene_init(3);
+  pm_add_scene(board->pm, ps, GAMEBOARD_SCENE_ID);
+
+  PanelData_T *pd;
+  pd = pm_panel_init(1, 1, 3, pm_panel_get_width(ps->background), print_headers, NULL, NULL, NULL);
+  pm_panel_add_border(pd, ' ', ' ', '*', '*', '*', '*', '*', '*');
+  pm_scene_add_panel(ps, pd, 0);
+  pd = pm_panel_init(yalign, xalign, rows + 2, columns * CELL_STR_LEN + 2, print_board, NULL, NULL, NULL);
+  pm_panel_add_border(pd, '#', '#', '#', '#', '#', '#', '#', '#');
+  pm_scene_add_panel(ps, pd, 1);
+  pd = pm_panel_init(yalign + rows + 2, xalign, 6, columns * CELL_STR_LEN + 2, print_debug_box, NULL, NULL, NULL);
+  pm_scene_add_panel(ps, pd, 2);
 }
 
-int generate_bombs(GameBoard_T *state, int bombs) {
-  // TODO: Instead of choosing all random spots, choose random points for
-  // clusters of bombs
-  // TODO: Generate bombs that create a radius around the initial click
-  state->game_state = BOMB_GENERATION;
-  for (int b = 0; b < bombs; b++) {
-    int placement;
-    do {
-      placement = rand() % (state->width * state->height);
-    } while (HASBOMB(state, placement));
-    SET_HASBOMB(state, placement);
+void explode_scene_init(GameBoard_T *board) {
+  PanelScene_T *ps = pm_scene_init(1);
+  pm_add_scene(board->pm, ps, LOOSE_SCENE_ID);
+
+  PanelData_T *pd;
+  unsigned int yalign = pm_panel_get_height(ps->background) / 2 - EXPLODE_SCENE_HEIGHT / 2;
+  unsigned int xalign = pm_panel_get_width(ps->background) / 2 - EXPLODE_SCENE_WIDTH / 2;
+  pd = pm_panel_init(yalign, xalign, EXPLODE_SCENE_HEIGHT + 1, EXPLODE_SCENE_WIDTH + 1, print_explode_sequence, NULL,
+                     NULL, NULL);
+  pm_scene_add_panel(ps, pd, 0);
+}
+
+int terminal_setup(GameBoard_T *board, unsigned int rows, unsigned int columns) {
+  setlocale(LC_ALL, "");
+  initscr();
+  cbreak();
+  noecho();
+  keypad(stdscr, TRUE);
+
+  /* Use the stdscr as a base and validate we can fit the gameboard */
+  int maxy = getmaxy(stdscr);
+  int maxx = getmaxx(stdscr);
+  if (!maxx || !maxy || maxy < 5 + rows || maxx < 2 + columns) {
+    return 1;
   }
 
-  // Update the number of bombs around each cell
-  for (int i = 0; i < state->height * state->width; i++) {
-    int surrondingBombs = SURRONDING_CELL_STATE(state, i, HASBOMB);
-    int numBombs;
-    COUNT_BITS(numBombs, surrondingBombs);
-    SET_NUMBOMBS(state, i, numBombs);
-  }
+  /* Setup colors */
+  start_color();
+  init_pair(CELL_COVERED, COLOR_BLACK, COLOR_WHITE);
+  init_pair(CELL_SELECTED, COLOR_WHITE, COLOR_GREEN);
+  init_pair(CELL_FLAGGED, COLOR_WHITE, COLOR_YELLOW);
+  init_pair(CELL_CONTAINS_BOMB, COLOR_WHITE, COLOR_RED);
+  init_pair(CELL_BACKTRACTED, COLOR_WHITE, COLOR_CYAN);
 
-  state->reamining = (state->width * state->height) - bombs;
+  init_pair(CELL_ONE_SURRONDING, COLOR_BLUE, COLOR_BLACK);
+  init_pair(CELL_TWO_SURRONDING, COLOR_GREEN, COLOR_BLACK);
+  init_pair(CELL_THREE_SURRONDING, COLOR_RED, COLOR_BLACK);
+  init_pair(CELL_FOUR_SURRONDING, COLOR_MAGENTA, COLOR_BLACK);
+  init_pair(CELL_FIVE_SURRONDING, COLOR_BLACK, COLOR_BLACK);
+  init_pair(CELL_SIX_SURRONDING, COLOR_CYAN, COLOR_BLACK);
+  init_pair(CELL_SEVEN_SURRONDING, COLOR_BLACK, COLOR_BLACK);
+  init_pair(CELL_EIGHT_SURRONDING, COLOR_BLACK, COLOR_BLACK);
+
+  /* Create panel manager and scenes */
+  board->pm = pm_init(NUM_SCENES);
+  gameboard_scene_init(board, rows, columns);
+  explode_scene_init(board);
+
+  /* +2 for boarder */
 
   return 0;
 }
 
+void generate_board(GameBoard_T *board, unsigned int rows, unsigned int columns) {
+  board->game_state = BOARD_GENERATION;
+  board->height = rows;
+  board->width = columns;
+  board->board = (uint8_t *)calloc(board->width * board->height, sizeof(uint8_t));
+  board->current_cell = 0;
+  board->num_bombs = 0;
+  board->numFlags = 0;
+  board->remaining_open_cells = 0;
+  board->seconds_elapsed = 0;
+  board->timeout = 1000; /* 1000 ms */
+  board->is_first_turn = 1;
+  board->refresh_board_print = 0;
+}
+
+void welcome_screen(void) {
+  /* https://patorjk.com/software/taag/#p=display&v=0&f=Sub-Zero&t=Minesweeper:
+   * Subzero, default width/height*/
+}
+
+int generate_bombs(GameBoard_T *board, int bombs) {
+  // TODO: Instead of choosing all random spots, choose random points for
+  // clusters of bombs
+  // TODO: Generate bombs that create a radius around the initial click
+  board->game_state = BOMB_GENERATION;
+  board->num_bombs = bombs;
+  board->numFlags = bombs;
+  for (int b = 0; b < board->num_bombs; b++) {
+    int placement;
+    do {
+      placement = rand() % (board->width * board->height);
+    } while (HASBOMB(board, placement) || IS_CELL_ADJACENT(board, board->current_cell, placement));
+    SET_HASBOMB(board, placement);
+  }
+
+  // Update the number of bombs around each cell
+  for (int i = 0; i < board->height * board->width; i++) {
+    int surrondingBombs = SURRONDING_CELL_STATE(board, i, HASBOMB);
+    SET_NUMBOMBS(board, i, COUNT_BITS(surrondingBombs));
+  }
+
+  board->remaining_open_cells = (board->width * board->height) - bombs;
+  return 0;
+}
+
 int main(int argc, char **argv, char **envp) {
-  GameBoard_T *game_board = (GameBoard_T *)malloc(sizeof(GameBoard_T));
-  game_board->game_state = GAME_INIT;
+  GameBoard_T *board = (GameBoard_T *)malloc(sizeof(GameBoard_T));
+  board->game_state = GAME_INIT;
 
   unsigned int rows, cols, bombs;
   if (argc != 4) {
@@ -532,81 +404,100 @@ int main(int argc, char **argv, char **envp) {
   }
 
   srand(11);
-  setlocale(LC_ALL, "");
-  initscr();
-  cbreak();
-  noecho();
-
-  start_color();
-  init_pair(CELL_COVERED, COLOR_BLACK, COLOR_WHITE);
-  init_pair(CELL_SELECTED, COLOR_GREEN, COLOR_GREEN);
-  init_pair(CELL_FLAGGED, COLOR_YELLOW, COLOR_YELLOW);
-  init_pair(CELL_CONTAINS_BOMB, COLOR_RED, COLOR_RED);
-  init_pair(CELL_BACKTRACTED, COLOR_CYAN, COLOR_CYAN);
 
   if (str2int(&rows, argv[1], 10)) {
-    fprintf(stderr, "Specified rows %s cannot be converted into an integer\n",
-            argv[1]);
+    fprintf(stderr, "Specified rows %s cannot be converted into an integer\n", argv[1]);
   }
 
   if (str2int(&cols, argv[2], 10)) {
-    fprintf(stderr,
-            "Specified columns %s cannot be converted into an integer\n",
-            argv[2]);
+    fprintf(stderr, "Specified columns %s cannot be converted into an integer\n", argv[2]);
   }
 
   if (str2int(&bombs, argv[3], 10)) {
-    fprintf(
-        stderr,
-        "Specified number of bombs %s cannot be converted into an integer\n",
-        argv[3]);
+    fprintf(stderr, "Specified number of bombs %s cannot be converted into an integer\n", argv[3]);
   }
 
-  generate_board(game_board, rows, cols);
+  if (terminal_setup(board, rows, cols)) {
+    printw("Terminal initialization failed. Exiting.\n");
+  } else {
+    generate_board(board, rows, cols);
+    // generate_bombs(board, bombs);
 
-  generate_bombs(game_board, bombs);
+    board->game_state = TURNS;
+    CellAction_T next_action;
 
-  game_board->game_state = TURNS;
-  CellAction_T next_action;
-  int selected_index = 0;
-  while (game_board->game_state == TURNS) {
-    print_board(game_board, selected_index);
-
-    next_action = do_cell_action(game_board, &selected_index);
-    switch (next_action) {
-    case UNCOVER:
-      // We have to check for a explode condition before win condition due to
-      // this logic
-      uncover_cell_block(game_board, selected_index);
-      break;
-
-    case FLAG:
-      if (!FLAGGED(game_board, selected_index)) {
-        SET_FLAGGED(game_board, selected_index);
-      } else {
-        CLEAR_FLAGGED(game_board, selected_index);
+    while (board->game_state == TURNS) {
+      pm_scene_draw_all(pm_get_scene(board->pm, GAMEBOARD_SCENE_ID), (void *)board);
+      CLEAR_PRINTED(board, board->current_cell);
+      next_action = do_cell_action(board);
+      if (board->timeout <= 0) {
+        board->timeout = 1000;
+        board->seconds_elapsed++;
       }
-      break;
+      switch (next_action) {
+      case UNCOVER:
+        // We have to check for a explode condition before win condition due to
+        // this logic
+        if (board->is_first_turn) {
+          generate_bombs(board, bombs);
+          board->is_first_turn = 0;
+        }
+        uncover_cell_block(board, board->current_cell);
+        break;
 
-    case NONE:
-    default:
-      break;
+      case FLAG:
+        if (board->numFlags == 0 || UNCOVERED(board, board->current_cell)) {
+          break;
+        }
+        if (!FLAGGED(board, board->current_cell)) {
+          SET_FLAGGED(board, board->current_cell);
+          board->numFlags--;
+        } else {
+          CLEAR_FLAGGED(board, board->current_cell);
+          board->numFlags++;
+        }
+        CLEAR_PRINTED(board, board->current_cell);
+        break;
+
+      case EXIT:
+        board->game_state = QUIT;
+        break;
+
+      case MOVE:
+        CLEAR_PRINTED(board, board->current_cell);
+        break;
+
+      case NONE:
+      default:
+        break;
+      }
+
+      board->game_state = update_game_condition(board, board->current_cell);
     }
-
-    game_board->game_state = check_game_condition(game_board, selected_index);
   }
 
-  print_board(game_board, -1);
-  if (game_board->game_state == WIN) {
-    printw("WINNER\n");
-    refresh();
+  switch (board->game_state) {
+  case EXPLODE:
+    pm_switch_scene(board->pm, LOOSE_SCENE_ID);
+    pm_scene_draw_all(pm_get_current_scene(board->pm), NULL);
+    pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
+    board->refresh_board_print = 1;
+    pm_scene_draw_all(pm_get_current_scene(board->pm), board);
+    board->refresh_board_print = 0;
+    break;
   }
+
+  // printw("Press any key to continue...");
+  refresh();
+  timeout(-1);
   getch();
 
-  game_board->game_state = CLEANUP;
+  board->game_state = CLEANUP;
   endwin();
-  if (game_board->board) {
-    free(game_board->board);
+  if (board->board) {
+    free(board->board);
   }
-  free(game_board);
+  free(board);
+
+  return 0;
 }
