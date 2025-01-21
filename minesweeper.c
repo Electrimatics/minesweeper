@@ -231,12 +231,12 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
     }
 
     /* Figure out which cells have a bomb around it */
-    int adjacent_bombs_bits = SURRONDING_CELL_STATE(board, index, ADJACENTBOMB);
-    int surronding_uncovered_bits = SURRONDING_CELL_STATE(board, index, !UNCOVERED);
+    int adjacent_bombs_bits = SURROUNDING_CELL_STATE(board, index, ADJACENTBOMB);
+    int surrounding_uncovered_bits = SURROUNDING_CELL_STATE(board, index, !UNCOVERED);
 
-    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, SET_UNCOVERED);
-    SURRONDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, CLEAR_PRINTED);
-    board->remaining_open_cells -= COUNT_BITS(adjacent_bombs_bits & surronding_uncovered_bits);
+    SURROUNDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, SET_UNCOVERED);
+    SURROUNDING_CELL_ACTION_STATEFUL(board, index, adjacent_bombs_bits, CLEAR_PRINTED);
+    board->remaining_open_cells -= COUNT_BITS(adjacent_bombs_bits & surrounding_uncovered_bits);
 
     /* Go through each direction and see if we need to uncover that cell */
     uint8_t dir = 0;
@@ -258,8 +258,8 @@ void uncover_cell_block(GameBoard_T *board, unsigned int index) {
     if (index != start_index) {
       prev_index = index;
       index = MOVE_CELL_ACTIONS[BACKTRACK_DIR(board, index)](board, index);
-      int surrondingBombs = SURRONDING_CELL_STATE(board, prev_index, HASBOMB);
-      SET_NUMBOMBS(board, prev_index, COUNT_BITS(surrondingBombs));
+      int surrounding_bombs = SURROUNDING_CELL_STATE(board, prev_index, HASBOMB);
+      SET_NUMBOMBS(board, prev_index, COUNT_BITS(surrounding_bombs));
       CLEAR_PRINTED(board, prev_index);
     }
   } while (index != start_index);
@@ -327,24 +327,24 @@ int terminal_setup(GameBoard_T *board, unsigned int rows, unsigned int columns) 
   init_pair(CELL_SELECTED, COLOR_WHITE, COLOR_GREEN);
   init_pair(CELL_FLAGGED, COLOR_WHITE, COLOR_YELLOW);
   init_pair(CELL_CONTAINS_BOMB, COLOR_WHITE, COLOR_RED);
-  init_pair(CELL_BACKTRACTED, COLOR_WHITE, COLOR_CYAN);
+  init_pair(CELL_BACKTRACKED, COLOR_WHITE, COLOR_CYAN);
 
-  init_pair(CELL_ONE_SURRONDING, COLOR_BLUE, COLOR_BLACK);
-  init_pair(CELL_TWO_SURRONDING, COLOR_GREEN, COLOR_BLACK);
-  init_pair(CELL_THREE_SURRONDING, COLOR_RED, COLOR_BLACK);
-  init_pair(CELL_FOUR_SURRONDING, COLOR_MAGENTA, COLOR_BLACK);
-  init_pair(CELL_FIVE_SURRONDING, COLOR_BLACK, COLOR_BLACK);
-  init_pair(CELL_SIX_SURRONDING, COLOR_CYAN, COLOR_BLACK);
-  init_pair(CELL_SEVEN_SURRONDING, COLOR_BLACK, COLOR_BLACK);
-  init_pair(CELL_EIGHT_SURRONDING, COLOR_BLACK, COLOR_BLACK);
+  init_pair(CELL_ONE_SURROUNDING, COLOR_BLUE, COLOR_BLACK);
+  init_pair(CELL_TWO_SURROUNDING, COLOR_GREEN, COLOR_BLACK);
+  init_pair(CELL_THREE_SURROUNDING, COLOR_RED, COLOR_BLACK);
+  init_pair(CELL_FOUR_SURROUNDING, COLOR_MAGENTA, COLOR_BLACK);
+  init_pair(CELL_FIVE_SURROUNDING, COLOR_BLACK, COLOR_BLACK);
+  init_pair(CELL_SIX_SURROUNDING, COLOR_CYAN, COLOR_BLACK);
+  init_pair(CELL_SEVEN_SURROUNDING, COLOR_BLACK, COLOR_BLACK);
+  init_pair(CELL_EIGHT_SURROUNDING, COLOR_BLACK, COLOR_BLACK);
 
   /* Create panel manager and scenes */
   board->pm = pm_init(NUM_SCENES);
   gameboard_scene_init(board, rows, columns);
   explode_scene_init(board);
 
-  /* +2 for boarder */
-
+  /* Switch to the gameboard scene first */
+  board->active_scene = pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
   return 0;
 }
 
@@ -352,7 +352,8 @@ void generate_board(GameBoard_T *board, unsigned int rows, unsigned int columns)
   board->game_state = BOARD_GENERATION;
   board->height = rows;
   board->width = columns;
-  board->board = (uint8_t *)calloc(board->width * board->height, sizeof(uint8_t));
+  board->board = (uint8_t *)malloc(board->width * board->height * sizeof(uint8_t));
+  memset(board->board, DEFAULT_CELL, board->width * board->height);
   board->current_cell = 0;
   board->num_bombs = 0;
   board->num_flags = 0;
@@ -385,8 +386,8 @@ int generate_bombs(GameBoard_T *board, int bombs) {
 
   // Update the number of bombs around each cell
   for (int i = 0; i < board->height * board->width; i++) {
-    int surrondingBombs = SURRONDING_CELL_STATE(board, i, HASBOMB);
-    SET_NUMBOMBS(board, i, COUNT_BITS(surrondingBombs));
+    int surrounding_bombs = SURROUNDING_CELL_STATE(board, i, HASBOMB);
+    SET_NUMBOMBS(board, i, COUNT_BITS(surrounding_bombs));
   }
 
   board->remaining_open_cells = (board->width * board->height) - bombs;
@@ -427,7 +428,7 @@ int main(int argc, char **argv, char **envp) {
     CellAction_T next_action;
 
     while (board->game_state == TURNS) {
-      pm_scene_draw_all(pm_get_scene(board->pm, GAMEBOARD_SCENE_ID), (void *)board);
+      pm_scene_draw_all(board->active_scene, (void *)board);
       CLEAR_PRINTED(board, board->current_cell);
       next_action = do_cell_action(board);
       if (board->timeout <= 0) {
@@ -476,17 +477,17 @@ int main(int argc, char **argv, char **envp) {
     }
   }
 
-  // switch (board->game_state) {
-  // case EXPLODE:
-  //   pm_switch_scene(board->pm, LOOSE_SCENE_ID);
-  //   pm_scene_draw_all(pm_get_current_scene(board->pm), NULL);
-  //   break;
-  // }
+  switch (board->game_state) {
+  case EXPLODE:
+    board->active_scene = pm_switch_scene(board->pm, LOOSE_SCENE_ID);
+    pm_scene_draw_all(board->active_scene, NULL);
+    break;
+  }
 
   board->refresh_board_print = 1;
   board->current_cell = INVALID_INDEX;
-  pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
-  pm_scene_draw_all(pm_get_current_scene(board->pm), board);
+  board->active_scene = pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
+  pm_scene_draw_all(board->active_scene, board);
   board->refresh_board_print = 0;
 
   // printw("Press any key to continue...");

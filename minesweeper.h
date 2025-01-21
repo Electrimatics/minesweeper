@@ -8,16 +8,16 @@
 #define CELL_FLAGGED 12
 #define CELL_UNCOVERED 13
 #define CELL_CONTAINS_BOMB 14
-#define CELL_BACKTRACTED 15
+#define CELL_BACKTRACKED 15
 
-#define CELL_ONE_SURRONDING 1
-#define CELL_TWO_SURRONDING 2
-#define CELL_THREE_SURRONDING 3
-#define CELL_FOUR_SURRONDING 4
-#define CELL_FIVE_SURRONDING 5
-#define CELL_SIX_SURRONDING 6
-#define CELL_SEVEN_SURRONDING 7
-#define CELL_EIGHT_SURRONDING 8
+#define CELL_ONE_SURROUNDING 1
+#define CELL_TWO_SURROUNDING 2
+#define CELL_THREE_SURROUNDING 3
+#define CELL_FOUR_SURROUNDING 4
+#define CELL_FIVE_SURROUNDING 5
+#define CELL_SIX_SURROUNDING 6
+#define CELL_SEVEN_SURROUNDING 7
+#define CELL_EIGHT_SURROUNDING 8
 
 #define CELL_STR_LEN 3
 #define CELL_UNCOVERED_STR " %c "
@@ -70,7 +70,7 @@ typedef enum PrintAction { CELL_UPDATE = 1, HEADER_UPDATE, BOARD_REFRESH } Print
   6: Flagged
   5: Uncovered
   4: Has bomb
-  3-0: Number of surronding bombs (0-8)
+  3-0: Number of surrounding bombs (0-8)
      : When backtracking: Incoming direction
         0 = _index_up
         1 = UP_RIGHT
@@ -90,7 +90,7 @@ typedef enum PrintAction { CELL_UPDATE = 1, HEADER_UPDATE, BOARD_REFRESH } Print
 
 typedef struct GameBoard {
   PanelManager_T *pm;
-  PanelScene_T *ps;
+  PanelScene_T *active_scene;
   GameState_T game_state;
   PrintAction_T print_action;
   uint8_t *board;
@@ -129,9 +129,14 @@ typedef enum {
 // Converts a (row, col) index into a one-dimensional offset
 // #define INDEX(board, row, col)          ((row*board->width)+col)
 
-// Default cell: No surrounding bombs, does not have bomb, uncovered, not
-// flagged,
-#define DEFAULT_CELL (0b00100000)
+/* Default cell
+  7: Printed: 0
+  6: Flagged: 0
+  5: Uncovered: 0
+  4: Has bomb: 0
+  3-0: Number of surrounding bombs (0-8): 0
+*/
+#define DEFAULT_CELL (0b00000000)
 
 // Invalid index: -1 (0xFFFF...) when unsigned
 #define INVALID_INDEX (-1)
@@ -162,7 +167,7 @@ typedef enum {
        : INVALID_INDEX)
 
 /* Gameboard adjacent cell indexing macros */
-// Gets the surronding indexes at the provided index if they exist, -1 otherwise
+// Gets the surrounding indexes at the provided index if they exist, -1 otherwise
 #define NUM_DIRECTIONS 8
 typedef unsigned int (*move_cell_func)(GameBoard_T *board, unsigned int index);
 
@@ -204,7 +209,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
    _index_down(board, src_index) == index || _index_downright(board, src_index) == index ||                            \
    _index_right(board, src_index) == index || _index_upright(board, src_index) == index)
 
-#define SURRONDING_CELL_ACTION(board, index, ACTION)                                                                   \
+#define SURROUNDING_CELL_ACTION(board, index, ACTION)                                                                   \
   ACTION(board, _index_up(board, index));                                                                              \
   ACTION(board, _index_upleft(board, index));                                                                          \
   ACTION(board, _index_left(board, index));                                                                            \
@@ -215,7 +220,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
   ACTION(board, _index_upright(board, index))
 
 // TODO: Switch if statements with (ACTION & (state & position))
-#define SURRONDING_CELL_ACTION_STATEFUL(board, index, state, ACTION)                                                   \
+#define SURROUNDING_CELL_ACTION_STATEFUL(board, index, state, ACTION)                                                   \
   if (state & 0x80)                                                                                                    \
     ACTION(board, _index_up(board, index));                                                                            \
   if (state & 0x40)                                                                                                    \
@@ -233,8 +238,8 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
   if (state & 0x01)                                                                                                    \
   ACTION(board, _index_upright(board, index))
 
-// Checks the surronding cells for a provided state
-#define SURRONDING_CELL_STATE(board, index, STATE)                                                                     \
+// Checks the surrounding cells for a provided state
+#define SURROUNDING_CELL_STATE(board, index, STATE)                                                                     \
   (STATE(board, _index_up(board, index)) << 7 | STATE(board, _index_upleft(board, index)) << 6 |                       \
    STATE(board, _index_left(board, index)) << 5 | STATE(board, _index_downleft(board, index)) << 4 |                   \
    STATE(board, _index_down(board, index)) << 3 | STATE(board, _index_downright(board, index)) << 2 |                  \
