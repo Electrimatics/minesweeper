@@ -137,7 +137,7 @@ void print_headers(struct PanelData *self, void *opaque) {
   wmove(win, 1, 1);
   // waddstr(win, GameStateStr[board->game_state]);
   // waddstr(win, "   ");
-  wprintw(win, "%03d", board->numFlags);
+  wprintw(win, "%03d", board->num_flags);
   wmove(win, 1, pm_panel_get_width(self) - 3);
   wprintw(win, "%03d", board->seconds_elapsed);
   wrefresh(win);
@@ -355,7 +355,7 @@ void generate_board(GameBoard_T *board, unsigned int rows, unsigned int columns)
   board->board = (uint8_t *)calloc(board->width * board->height, sizeof(uint8_t));
   board->current_cell = 0;
   board->num_bombs = 0;
-  board->numFlags = 0;
+  board->num_flags = 0;
   board->remaining_open_cells = 0;
   board->seconds_elapsed = 0;
   board->timeout = 1000; /* 1000 ms */
@@ -374,7 +374,7 @@ int generate_bombs(GameBoard_T *board, int bombs) {
   // TODO: Generate bombs that create a radius around the initial click
   board->game_state = BOMB_GENERATION;
   board->num_bombs = bombs;
-  board->numFlags = bombs;
+  board->num_flags = bombs;
   for (int b = 0; b < board->num_bombs; b++) {
     int placement;
     do {
@@ -446,15 +446,15 @@ int main(int argc, char **argv, char **envp) {
         break;
 
       case FLAG:
-        if (board->numFlags == 0 || UNCOVERED(board, board->current_cell)) {
+        if (board->num_flags == 0 || UNCOVERED(board, board->current_cell)) {
           break;
         }
         if (!FLAGGED(board, board->current_cell)) {
           SET_FLAGGED(board, board->current_cell);
-          board->numFlags--;
+          board->num_flags--;
         } else {
           CLEAR_FLAGGED(board, board->current_cell);
-          board->numFlags++;
+          board->num_flags++;
         }
         CLEAR_PRINTED(board, board->current_cell);
         break;
@@ -476,19 +476,20 @@ int main(int argc, char **argv, char **envp) {
     }
   }
 
-  switch (board->game_state) {
-  case EXPLODE:
-    pm_switch_scene(board->pm, LOOSE_SCENE_ID);
-    pm_scene_draw_all(pm_get_current_scene(board->pm), NULL);
-    pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
-    board->refresh_board_print = 1;
-    pm_scene_draw_all(pm_get_current_scene(board->pm), board);
-    board->refresh_board_print = 0;
-    break;
-  }
+  // switch (board->game_state) {
+  // case EXPLODE:
+  //   pm_switch_scene(board->pm, LOOSE_SCENE_ID);
+  //   pm_scene_draw_all(pm_get_current_scene(board->pm), NULL);
+  //   break;
+  // }
+
+  board->refresh_board_print = 1;
+  board->current_cell = INVALID_INDEX;
+  pm_switch_scene(board->pm, GAMEBOARD_SCENE_ID);
+  pm_scene_draw_all(pm_get_current_scene(board->pm), board);
+  board->refresh_board_print = 0;
 
   // printw("Press any key to continue...");
-  refresh();
   timeout(-1);
   getch();
 
