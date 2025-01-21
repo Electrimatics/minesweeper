@@ -1,5 +1,6 @@
 #include "panel_manager.h"
 #include <curses.h>
+#include <ncurses.h>
 #include <panel.h>
 #include <stdlib.h>
 
@@ -47,8 +48,10 @@ PanelScene_T *pm_switch_scene(PanelManager_T *pm, PanelSceneID id) {
   PanelScene_T *ps = pm_get_scene(pm, id);
   if (ps) {
     ps->update_stacking_order = 1;
-    pm_scene_update_panel_order(ps);
+
+    /* Show panels before updating stacking order */
     pm_scene_show_all(ps);
+    pm_scene_update_panel_order(ps);
     pm->current_scene = id;
   }
   return ps;
@@ -105,10 +108,10 @@ void pm_scene_update_panel_order(PanelScene_T *ps) {
   if (ps->update_stacking_order) {
     top_panel(ps->background->panel);
     PM_FOR_EACH_PANEL(ps, data, top_panel(data->panel));
-    update_panels();
-    doupdate();
     ps->update_stacking_order = 0;
   }
+  update_panels();
+  doupdate();
 }
 
 void pm_scene_show_all(PanelScene_T *ps) {
@@ -161,6 +164,9 @@ PanelData_T *pm_panel_init(int y, int x, int height, int width, draw_handler dra
   pd->init_cb = init_cb;
   pd->exit_cb = exit_cb;
   set_panel_userptr(pd->panel, user_ptr);
+
+  /* Hide by default */
+  hide_panel(pd->panel);
 
   return pd;
 }
