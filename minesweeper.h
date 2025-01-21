@@ -209,7 +209,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
    _index_down(board, src_index) == index || _index_downright(board, src_index) == index ||                            \
    _index_right(board, src_index) == index || _index_upright(board, src_index) == index)
 
-#define SURROUNDING_CELL_ACTION(board, index, ACTION)                                                                   \
+#define SURROUNDING_CELL_ACTION(board, index, ACTION)                                                                  \
   ACTION(board, _index_up(board, index));                                                                              \
   ACTION(board, _index_upleft(board, index));                                                                          \
   ACTION(board, _index_left(board, index));                                                                            \
@@ -220,7 +220,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
   ACTION(board, _index_upright(board, index))
 
 // TODO: Switch if statements with (ACTION & (state & position))
-#define SURROUNDING_CELL_ACTION_STATEFUL(board, index, state, ACTION)                                                   \
+#define SURROUNDING_CELL_ACTION_STATEFUL(board, index, state, ACTION)                                                  \
   if (state & 0x80)                                                                                                    \
     ACTION(board, _index_up(board, index));                                                                            \
   if (state & 0x40)                                                                                                    \
@@ -239,7 +239,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
   ACTION(board, _index_upright(board, index))
 
 // Checks the surrounding cells for a provided state
-#define SURROUNDING_CELL_STATE(board, index, STATE)                                                                     \
+#define SURROUNDING_CELL_STATE(board, index, STATE)                                                                    \
   (STATE(board, _index_up(board, index)) << 7 | STATE(board, _index_upleft(board, index)) << 6 |                       \
    STATE(board, _index_left(board, index)) << 5 | STATE(board, _index_downleft(board, index)) << 4 |                   \
    STATE(board, _index_down(board, index)) << 3 | STATE(board, _index_downright(board, index)) << 2 |                  \
