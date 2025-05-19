@@ -3,23 +3,32 @@
 #include "panel_manager.h"
 
 /* Cell display macros */
-#define CELL_COVERED 10
-#define CELL_SELECTED 11
-#define CELL_FLAGGED 12
-#define CELL_UNCOVERED 13
-#define CELL_CONTAINS_BOMB 14
-#define CELL_BACKTRACKED 15
+static const unsigned int CELL_COVERED_DISPLAY = 10;
+static const unsigned int CELL_SELECTED_DISPLAY = 11;
+static const unsigned int CELL_FLAGGED_DISPLAY = 12;
+static const unsigned int CELL_UNCOVERED_DISPLAY = 13;
+static const unsigned int CELL_HASBOMB_DISPLAY = 14;
+static const unsigned int CELL_BACKTRACKED_DISPLAY = 15;
 
-#define CELL_ONE_SURROUNDING 1
-#define CELL_TWO_SURROUNDING 2
-#define CELL_THREE_SURROUNDING 3
-#define CELL_FOUR_SURROUNDING 4
-#define CELL_FIVE_SURROUNDING 5
-#define CELL_SIX_SURROUNDING 6
-#define CELL_SEVEN_SURROUNDING 7
-#define CELL_EIGHT_SURROUNDING 8
+static const unsigned int CELL_ONE_SURROUNDING_DISPLAY = 1;
+static const unsigned int CELL_TWO_SURROUNDING_DISPLAY = 2;
+static const unsigned int CELL_THREE_SURROUNDING_DISPLAY = 3;
+static const unsigned int CELL_FOUR_SURROUNDING_DISPLAY = 4;
+static const unsigned int CELL_FIVE_SURROUNDING_DISPLAY = 5;
+static const unsigned int CELL_SIX_SURROUNDING_DISPLAY = 6;
+static const unsigned int CELL_SEVEN_SURROUNDING_DISPLAY = 7;
+static const unsigned int CELL_EIGHT_SURROUNDING_DISPLAY = 8;
 
-#define CELL_STR_LEN 3
+#define CELL_FG_COLOR_ONE_SURROUNDING (10)
+#define CELL_FG_COLOR_TWO_SURROUNDING (11)
+#define CELL_FG_COLOR_THREE_SURROUNDING (12)
+#define CELL_FG_COLOR_FOUR_SURROUNDING (13)
+#define CELL_FG_COLOR_FIVE_SURROUNDING (14)
+#define CELL_FG_COLOR_SIX_SURROUNDING (15)
+#define CELL_FG_COLOR_SEVEN_SURROUNDING (16)
+#define CELL_FG_COLOR_EIGHT_SURROUNDING (17)
+
+static const unsigned int CELL_STR_LEN = 3;
 #define CELL_UNCOVERED_STR " %c "
 #ifndef DEBUG
 #define CELL_COVERED_STR "   "
@@ -33,11 +42,11 @@
 #define CELL_HASBOMB_STR "[B]"
 #endif
 
-#define NUM_SCENES 4
-#define GAMEBOARD_SCENE_ID 0
-#define OPTIONS_SCENE_ID 1
-#define WIN_SCENE_ID 2
-#define LOOSE_SCENE_ID 3
+static const unsigned int NUM_SCENES = 4;
+static const unsigned int GAMEBOARD_SCENE_ID = 0;
+static const unsigned int OPTIONS_SCENE_ID = 1;
+static const unsigned int WIN_SCENE_ID = 2;
+static const unsigned int LOOSE_SCENE_ID = 3;
 
 typedef enum GameState {
   GAME_INIT,
@@ -89,17 +98,24 @@ typedef enum PrintAction { CELL_UPDATE = 1, HEADER_UPDATE, BOARD_REFRESH } Print
 #define CELL_BACKTRACK_BITS (0x0f)
 
 typedef struct GameBoard {
+  /* Display data */
   PanelManager_T *pm;
   PanelScene_T *active_scene;
-  GameState_T game_state;
   PrintAction_T print_action;
+
+  /* Board data */
   uint8_t *board;
   unsigned int height;
   unsigned int width;
-  unsigned int current_cell;
   unsigned int num_bombs;
   unsigned int num_flags;
   unsigned int remaining_open_cells;
+
+  /* Player data */
+  unsigned int curr_index;
+
+  /* State data */
+  GameState_T game_state;
   unsigned int seconds_elapsed;
   int timeout;
   int is_first_turn;
@@ -136,13 +152,13 @@ typedef enum {
   4: Has bomb: 0
   3-0: Number of surrounding bombs (0-8): 0
 */
-#define DEFAULT_CELL (0b00000000)
+static const unsigned int DEFAULT_CELL = 0b00000000;
 
 // Invalid index: -1 (0xFFFF...) when unsigned
-#define INVALID_INDEX (-1)
+static const unsigned int INVALID_INDEX = -1;
 
 // Converts an index into a row/column and vice versa
-#define CELL_INDEX(board, row, col) (row * board->width + col)
+#define CELL_INDEX(board, row, col) ((row) * board->width + (col))
 #define CELL_ROW(board, index) (index / board->width)
 #define CELL_COL(board, index) (index % board->width)
 
@@ -150,60 +166,68 @@ typedef enum {
 #define CELL_COL_CURSOR(board, index) (CELL_COL(board, index) * CELL_STR_LEN)
 
 // Checks if a cell index is within the bounds of the gameboard.
-#define BOARD_BOUND_CHECK(board, index) ((unsigned int)index < board->width * board->height)
+#define INDEX_ON_BOARD(board, index) ((unsigned int)(index < board->width * board->height))
+#define ROW_ON_BOARD(board, row) ((unsigned int)(row) < board->height)
+#define COL_ON_BOARD(board, col) ((unsigned int)(col) < board->width)
 
 // Return a cell's contents if it's in the gameboard, default cell otherwise
-#define CELL(board, index) (BOARD_BOUND_CHECK(board, index) ? *(board->board + index) : DEFAULT_CELL)
-
-// Gets the contents of a cell without checking the index. Used when cell
-// content needs to be modified
-#define KNOWN_CELL(board, index) (*(board->board + index))
-
-// Returns the index
-#define INDEX_ROW_CHECK(board, index, new_index, row_offset)                                                           \
-  ((BOARD_BOUND_CHECK(board, (new_index)) &&                                                                           \
-    ((index) / board->width + row_offset) == (unsigned int)((new_index) / board->width))                               \
-       ? new_index                                                                                                     \
-       : INVALID_INDEX)
+#define CELL_KNOWN(board, index) (*(board->board + (index)))
+#define CELL(board, index) (INDEX_ON_BOARD(board, index) ? CELL_KNOWN(board, index) : DEFAULT_CELL)
 
 /* Gameboard adjacent cell indexing macros */
-// Gets the surrounding indexes at the provided index if they exist, -1 otherwise
-#define NUM_DIRECTIONS 8
+// Gets the surrounding indexes at the provided index if they exist, INVALID_INDEX otherwise
+static const unsigned int NUM_DIRECTIONS = 8;
 typedef unsigned int (*move_cell_func)(GameBoard_T *board, unsigned int index);
 
 static inline unsigned int _index_up(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index - board->width, -1);
+  unsigned int _row = CELL_ROW(board, index);
+  return (ROW_ON_BOARD(board, (_row - 1))) ? (index - board->width) : INVALID_INDEX;
 }
 
 static inline unsigned int _index_upleft(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index - board->width - 1, -1);
+  unsigned int _row = CELL_ROW(board, index);
+  unsigned int _col = CELL_COL(board, index);
+  return (ROW_ON_BOARD(board, (_row - 1)) && COL_ON_BOARD(board, (_col - 1))) ? (index - board->width - 1)
+                                                                              : INVALID_INDEX;
 }
 
 static inline unsigned int _index_left(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index - 1, 0);
+  unsigned int _col = CELL_COL(board, index);
+  return (COL_ON_BOARD(board, (_col - 1))) ? (index - 1) : INVALID_INDEX;
 }
 
 static inline unsigned int _index_downleft(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index + board->width - 1, 1);
+  unsigned int _row = CELL_ROW(board, index);
+  unsigned int _col = CELL_COL(board, index);
+  return (ROW_ON_BOARD(board, (_row + 1)) && COL_ON_BOARD(board, (_col - 1))) ? (index + board->width - 1)
+                                                                              : INVALID_INDEX;
 }
 
 static inline unsigned int _index_down(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index + board->width, 1);
+  unsigned int _row = CELL_ROW(board, index);
+  return (ROW_ON_BOARD(board, (_row + 1))) ? (index + board->width) : INVALID_INDEX;
 }
 
 static inline unsigned int _index_downright(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index + board->width + 1, 1);
+  unsigned int _row = CELL_ROW(board, index);
+  unsigned int _col = CELL_COL(board, index);
+  return (ROW_ON_BOARD(board, (_row + 1)) && COL_ON_BOARD(board, (_col + 1))) ? (index + board->width + 1)
+                                                                              : INVALID_INDEX;
 }
 
 static inline unsigned int _index_right(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index + 1, 0);
+  unsigned int _col = CELL_COL(board, index);
+  return (COL_ON_BOARD(board, (_col + 1))) ? (index + 1) : INVALID_INDEX;
 }
 
 static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index) {
-  return INDEX_ROW_CHECK(board, index, index - board->width + 1, -1);
+  unsigned int _row = CELL_ROW(board, index);
+  unsigned int _col = CELL_COL(board, index);
+  return (ROW_ON_BOARD(board, (_row - 1)) && COL_ON_BOARD(board, (_col + 1))) ? (index - board->width + 1)
+                                                                              : INVALID_INDEX;
 }
 
-#define IS_CELL_ADJACENT(board, src_index, index)                                                                      \
+#define CELL_IS_ADJACENT(board, src_index, index)                                                                      \
   (_index_up(board, src_index) == index || _index_upleft(board, src_index) == index ||                                 \
    _index_left(board, src_index) == index || _index_downleft(board, src_index) == index ||                             \
    _index_down(board, src_index) == index || _index_downright(board, src_index) == index ||                            \
@@ -249,42 +273,42 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
 #define COUNT_BITS(x) __builtin_popcount((unsigned int)x)
 
 /* Cell state query and modification macros */
-#define SET_NUMBOMBS(board, index, num)                                                                                \
-  CLEAR_NUMBOMBS(board, index);                                                                                        \
-  KNOWN_CELL(board, index) |= (num)
-#define CLEAR_NUMBOMBS(board, index) (KNOWN_CELL(board, index) &= ~CELL_NUMBOMBS_BITS)
-#define NUMBOMBS(board, index) (CELL(board, index) & CELL_NUMBOMBS_BITS)
+#define CELL_NUMBOMBS(board, index) (CELL(board, index) & CELL_NUMBOMBS_BITS)
+#define CELL_CLEAR_NUMBOMBS(board, index) (CELL_KNOWN(board, index) &= ~CELL_NUMBOMBS_BITS)
+#define CELL_SET_NUMBOMBS(board, index, num)                                                                           \
+  CELL_CLEAR_NUMBOMBS(board, index);                                                                                   \
+  CELL_KNOWN(board, index) |= (num)
 #define ADJACENTBOMB(board, index) ((CELL(board, index) & CELL_NUMBOMBS_BITS) > 0)
 
-#define SET_HASBOMB(board, index) (KNOWN_CELL(board, index) |= CELL_HASBOMB_BIT)
-#define CLEAR_HASBOMB(board, index) (KNOWN_CELL(board, index) &= ~CELL_HASBOMB_BIT)
-// #define TOGGLE_HASBOMB(board, index) (KNOWN_CELL(board, index) ^=
-// ~KNOWN_CELL(board, index) & (HASBOMB(board, index))
-#define HASBOMB(board, index) ((CELL(board, index) & CELL_HASBOMB_BIT))
+#define CELL_HASBOMB(board, index) ((CELL(board, index) & CELL_HASBOMB_BIT))
+#define CELL_CLEAR_HASBOMB(board, index) (CELL_KNOWN(board, index) &= ~CELL_HASBOMB_BIT)
+#define CELL_SET_HASBOMB(board, index) (CELL_KNOWN(board, index) |= CELL_HASBOMB_BIT)
 
-#define SET_UNCOVERED(board, index) (KNOWN_CELL(board, index) |= CELL_UNCOVERED_BIT)
-#define CLEAR_UNCOVERED(board, index) (KNOWN_CELL(board, index) &= ~CELL_UNCOVERED_BIT)
-#define UNCOVERED(board, index) ((CELL(board, index) & CELL_UNCOVERED_BIT))
+#define CELL_CLEAR_UNCOVERED(board, index) (CELL_KNOWN(board, index) &= ~CELL_UNCOVERED_BIT)
+#define CELL_SET_UNCOVERED(board, index) (CELL_KNOWN(board, index) |= CELL_UNCOVERED_BIT)
+#define CELL_UNCOVERED(board, index) ((CELL(board, index) & CELL_UNCOVERED_BIT))
 
-#define SET_FLAGGED(board, index) (KNOWN_CELL(board, index) |= CELL_FLAGGED_BIT)
-#define CLEAR_FLAGGED(board, index) (KNOWN_CELL(board, index) &= ~CELL_FLAGGED_BIT)
-#define FLAGGED(board, index) ((CELL(board, index) & CELL_FLAGGED_BIT))
+#define CELL_CLEAR_FLAGGED(board, index) (CELL_KNOWN(board, index) &= ~CELL_FLAGGED_BIT)
+#define CELL_SET_FLAGGED(board, index) (CELL_KNOWN(board, index) |= CELL_FLAGGED_BIT)
+#define CELL_FLAGGED(board, index) ((CELL(board, index) & CELL_FLAGGED_BIT))
 
-#define SET_PRINTED(board, index) (KNOWN_CELL(board, index) |= CELL_PRINTED_BIT)
-#define CLEAR_PRINTED(board, index) (KNOWN_CELL(board, index) &= ~CELL_PRINTED_BIT)
-#define PRINTED(board, index) (CELL(board, index) & CELL_PRINTED_BIT)
+#define CELL_CLEAR_PRINTED(board, index) (CELL_KNOWN(board, index) &= ~CELL_PRINTED_BIT)
+#define CELL_SET_PRINTED(board, index) (CELL_KNOWN(board, index) |= CELL_PRINTED_BIT)
+#define CELL_PRINTED(board, index) (CELL(board, index) & CELL_PRINTED_BIT)
 
 #define SET_BACKTRACK_DIR(board, index, val)                                                                           \
   CLEAR_BACKTRACK_DIR(board, index);                                                                                   \
-  KNOWN_CELL(board, index) |= (val & 0x0f)
-#define CLEAR_BACKTRACK_DIR(board, index) (KNOWN_CELL(board, index) &= ~0x0f)
+  CELL_KNOWN(board, index) |= (val & 0x0f)
+#define CLEAR_BACKTRACK_DIR(board, index) (CELL_KNOWN(board, index) &= ~0x0f)
 #define BACKTRACK_DIR(board, index) ((CELL(board, index) & 0x0f))
 #define BT_UP 0
 #define BT_DOWN 1
 #define BT_RIGHT 2
 #define BT_LEFT 3
 
-#define UNCOVER_BLOCK_CONDITION(board, index) (!NUMBOMBS(board, index) && !UNCOVERED(board, index))
+#define UNCOVER_BLOCK_CONDITION(board, index) (!CELL_NUMBOMBS(board, index) && !CELL_UNCOVERED(board, index))
+#define PLACE_BOMB_CONDITION(board, index)                                                                             \
+  (index != board->curr_index || CELL_HASBOMB(board, index) || CELL_IS_ADJACENT(board, board->curr_index, index))
 
 /* Explode sequence */
 #define EXPLODE_SCENE_WIDTH 54
