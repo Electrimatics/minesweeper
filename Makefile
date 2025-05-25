@@ -9,7 +9,7 @@ panel_manager.o: panel_manager.c
 	$(CXX) -c $(FLAGS) $^
 
 debug: panel_manager_debug.o minesweeper.c explode.c
-	$(CXX) $(FLAGS) -g -DDEBUG $^ -o minesweeper-debug $(LIBS:%=-l%)
+	$(CXX) $(FLAGS) -g -DDEBUG -DAUTOSOLVE $^ -o minesweeper-debug $(LIBS:%=-l%)
 
 panel_manager_debug.o: panel_manager.c
 	$(CXX) -c $(FLAGS) -g -DDEBUG $^ -o $@

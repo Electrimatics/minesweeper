@@ -146,27 +146,27 @@ void print_headers(struct PanelData *self, void *opaque) {
 }
 
 void print_cell_contents(WINDOW *win, GameBoard_T *board, unsigned int index) {
-  if (board->curr_index == index) {
-    PRINT_CELL_WITH_COLOR(win, CELL_SELECTED_DISPLAY, waddstr(win, CELL_SELECTED_STR));
-
-  } else if (CELL_UNCOVERED(board, index)) {
+  if (CELL_UNCOVERED(board, index)) {
+    int bombs = CELL_NUMBOMBS(board, index);
     if (CELL_HASBOMB(board, index)) {
-      PRINT_CELL_WITH_COLOR(win, CELL_HASBOMB_DISPLAY, waddstr(win, CELL_HASBOMB_STR));
+      CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_HASBOMB_DISPLAY), waddstr(win, CELL_HASBOMB_STR));
+    } else if (board->curr_index == index) {
+      CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_SELECTED_COVERED_DISPLAY) | A_BOLD,
+                            wprintw(win, CELL_SELECTED_STR, (bombs) ? bombs + '0' : ' '));
     } else {
-      int bombs = CELL_NUMBOMBS(board, index);
-      PRINT_CELL_WITH_COLOR(win, bombs, wprintw(win, CELL_UNCOVERED_STR, (bombs) ? bombs + '0' : ' '););
+      CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(bombs + 10) | A_BOLD, wprintw(win, CELL_UNCOVERED_STR, bombs + '0'););
     }
-
+  } else if (board->curr_index == index) {
+    CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_SELECTED_UNCOVERED_DISPLAY), waddstr(win, CELL_COVERED_STR));
   } else if (CELL_FLAGGED(board, index)) {
-    PRINT_CELL_WITH_COLOR(win, CELL_FLAGGED_DISPLAY, waddstr(win, CELL_FLAGGED_STR));
+    CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_FLAGGED_DISPLAY), waddstr(win, CELL_FLAGGED_STR));
 
 #ifdef DEBUG
   } else if (CELL_HASBOMB(board, index)) {
-    PRINT_CELL_WITH_COLOR(win, CELL_HASBOMB_DISPLAY, waddstr(win, CELL_HASBOMB_STR));
+    CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_HASBOMB_DISPLAY), waddstr(win, CELL_HASBOMB_STR));
 #endif
-
   } else {
-    PRINT_CELL_WITH_COLOR(win, CELL_COVERED_DISPLAY, waddstr(win, CELL_COVERED_STR));
+    CELL_PRINT_WITH_ATTRS(win, COLOR_PAIR(CELL_COVERED_DISPLAY), waddstr(win, CELL_COVERED_STR));
   }
 }
 
@@ -293,7 +293,9 @@ void gameboard_scene_init(GameBoard_T *board, int rows, int columns) {
   pd = pm_panel_init(yalign, xalign, rows + 2, columns * CELL_STR_LEN + 2, print_board, NULL, NULL, NULL);
   pm_panel_add_border(pd, '#', '#', '#', '#', '#', '#', '#', '#');
   pm_scene_add_panel(ps, pd, 1);
+#ifdef DEBUG
   pd = pm_panel_init(yalign + rows + 2, xalign, 6, columns * CELL_STR_LEN + 2, print_debug_box, NULL, NULL, NULL);
+#endif
   pm_scene_add_panel(ps, pd, 2);
 }
 
@@ -325,20 +327,44 @@ int terminal_setup(GameBoard_T *board, unsigned int rows, unsigned int columns) 
 
   /* Setup colors */
   start_color();
-  init_pair(CELL_COVERED_DISPLAY, COLOR_BLACK, COLOR_WHITE);
-  init_pair(CELL_SELECTED_DISPLAY, COLOR_WHITE, COLOR_GREEN);
-  init_pair(CELL_FLAGGED_DISPLAY, COLOR_WHITE, COLOR_YELLOW);
-  init_pair(CELL_HASBOMB_DISPLAY, COLOR_WHITE, COLOR_RED);
-  init_pair(CELL_BACKTRACKED_DISPLAY, COLOR_WHITE, COLOR_CYAN);
+  init_color(CELL_COLOR_ZERO_SURROUNDING, 753, 753, 753);
+  init_color(CELL_COLOR_ONE_SURROUNDING, 4, 0, 996);
+  init_color(CELL_COLOR_TWO_SURROUNDING, 4, 498, 4);
+  init_color(CELL_COLOR_THREE_SURROUNDING, 996, 0, 0);
+  init_color(CELL_COLOR_FOUR_SURROUNDING, 4, 0, 502);
+  init_color(CELL_COLOR_FIVE_SURROUNDING, 506, 4, 8);
+  init_color(CELL_COLOR_SIX_SURROUNDING, 0, 502, 506);
+  init_color(CELL_COLOR_SEVEN_SURROUNDING, 0, 0, 0);
+  init_color(CELL_COLOR_EIGHT_SURROUNDING, 502, 502, 502);
 
-  init_pair(CELL_ONE_SURROUNDING_DISPLAY, COLOR_BLUE, COLOR_BLACK);
-  init_pair(CELL_TWO_SURROUNDING_DISPLAY, COLOR_GREEN, COLOR_BLACK);
-  init_pair(CELL_THREE_SURROUNDING_DISPLAY, COLOR_RED, COLOR_BLACK);
-  init_pair(CELL_FOUR_SURROUNDING_DISPLAY, COLOR_MAGENTA, COLOR_BLACK);
-  init_pair(CELL_FIVE_SURROUNDING_DISPLAY, COLOR_BLACK, COLOR_BLACK);
-  init_pair(CELL_SIX_SURROUNDING_DISPLAY, COLOR_CYAN, COLOR_BLACK);
-  init_pair(CELL_SEVEN_SURROUNDING_DISPLAY, COLOR_BLACK, COLOR_BLACK);
-  init_pair(CELL_EIGHT_SURROUNDING_DISPLAY, COLOR_BLACK, COLOR_BLACK);
+  init_color(CELL_COLOR_SELECTED_COVERED, 689, 980, 681);
+  init_color(CELL_COLOR_SELECTED_UNCOVERED, 689, 980, 681);
+  init_color(CELL_COLOR_COVERED, 502, 502, 502);
+  init_color(CELL_COLOR_FLAGGED, 626, 643, 113);
+  init_color(CELL_COLOR_UNCOVERED, 753, 753, 753);
+  init_color(CELL_COLOR_HASBOMB, 681, 68, 68);
+#ifdef DEBUG
+  // init_color(CELL_COLOR_BACKTRACKED, );
+#endif
+
+  init_pair(CELL_SELECTED_COVERED_DISPLAY, COLOR_BLACK, CELL_COLOR_SELECTED_COVERED);
+  init_pair(CELL_SELECTED_UNCOVERED_DISPLAY, COLOR_BLACK, CELL_COLOR_SELECTED_UNCOVERED);
+  init_pair(CELL_COVERED_DISPLAY, COLOR_BLACK, CELL_COLOR_COVERED);
+  init_pair(CELL_FLAGGED_DISPLAY, COLOR_BLACK, CELL_COLOR_FLAGGED);
+  init_pair(CELL_HASBOMB_DISPLAY, COLOR_BLACK, CELL_COLOR_HASBOMB);
+#ifdef DEBUG
+  init_pair(CELL_BACKTRACKED_DISPLAY, COLOR_WHITE, COLOR_CYAN);
+#endif
+
+  init_pair(CELL_ZERO_SURROUNDING_DISPLAY, CELL_COLOR_UNCOVERED, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_ONE_SURROUNDING_DISPLAY, CELL_COLOR_ONE_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_TWO_SURROUNDING_DISPLAY, CELL_COLOR_TWO_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_THREE_SURROUNDING_DISPLAY, CELL_COLOR_THREE_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_FOUR_SURROUNDING_DISPLAY, CELL_COLOR_FOUR_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_FIVE_SURROUNDING_DISPLAY, CELL_COLOR_FIVE_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_SIX_SURROUNDING_DISPLAY, CELL_COLOR_SIX_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_SEVEN_SURROUNDING_DISPLAY, CELL_COLOR_SEVEN_SURROUNDING, CELL_COLOR_UNCOVERED);
+  init_pair(CELL_EIGHT_SURROUNDING_DISPLAY, CELL_COLOR_EIGHT_SURROUNDING, CELL_COLOR_UNCOVERED);
 
   /* Create panel manager and scenes */
   board->pm = pm_init(NUM_SCENES);
@@ -385,9 +411,9 @@ int generate_bombs(GameBoard_T *board, int bombs) {
     int placement;
     do {
       placement = rand() % (board->width * board->height);
-    } while (PLACE_BOMB_CONDITION(board, placement));
+    } while (!PLACE_BOMB_CONDITION(board, placement));
     CELL_SET_HASBOMB(board, placement);
-#ifdef DEBUG
+#if defined(DEBUG) || defined(AUTOSOLVE)
     CELL_CLEAR_PRINTED(board, placement);
 #endif
   }
@@ -430,8 +456,8 @@ int main(int argc, char **argv, char **envp) {
     printw("Terminal initialization failed. Exiting.\n");
   } else {
     generate_board(board, rows, cols);
-    // generate_bombs(board, bombs);
 
+#ifndef AUTOSOLVE
     board->game_state = TURNS;
     CellAction_T next_action;
 
@@ -483,6 +509,16 @@ int main(int argc, char **argv, char **envp) {
 
       board->game_state = update_game_condition(board, board->curr_index);
     }
+
+#else
+    generate_bombs(board, bombs);
+    for (unsigned int index = 0; index < board->height * board->width; index++) {
+      if (!CELL_HASBOMB(board, index)) {
+        CELL_SET_UNCOVERED(board, index);
+        CELL_CLEAR_PRINTED(board, index);
+      }
+    }
+#endif
   }
 
   switch (board->game_state) {

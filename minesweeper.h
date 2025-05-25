@@ -3,41 +3,51 @@
 #include "panel_manager.h"
 
 /* Cell display macros */
-static const unsigned int CELL_COVERED_DISPLAY = 10;
-static const unsigned int CELL_SELECTED_DISPLAY = 11;
-static const unsigned int CELL_FLAGGED_DISPLAY = 12;
-static const unsigned int CELL_UNCOVERED_DISPLAY = 13;
-static const unsigned int CELL_HASBOMB_DISPLAY = 14;
-static const unsigned int CELL_BACKTRACKED_DISPLAY = 15;
+static const unsigned int CELL_SELECTED_COVERED_DISPLAY = 20;
+static const unsigned int CELL_SELECTED_UNCOVERED_DISPLAY = 21;
+static const unsigned int CELL_COVERED_DISPLAY = 22;
+static const unsigned int CELL_FLAGGED_DISPLAY = 23;
+static const unsigned int CELL_UNCOVERED_DISPLAY = 24;
+static const unsigned int CELL_HASBOMB_DISPLAY = 25;
+static const unsigned int CELL_BACKTRACKED_DISPLAY = 26;
 
-static const unsigned int CELL_ONE_SURROUNDING_DISPLAY = 1;
-static const unsigned int CELL_TWO_SURROUNDING_DISPLAY = 2;
-static const unsigned int CELL_THREE_SURROUNDING_DISPLAY = 3;
-static const unsigned int CELL_FOUR_SURROUNDING_DISPLAY = 4;
-static const unsigned int CELL_FIVE_SURROUNDING_DISPLAY = 5;
-static const unsigned int CELL_SIX_SURROUNDING_DISPLAY = 6;
-static const unsigned int CELL_SEVEN_SURROUNDING_DISPLAY = 7;
-static const unsigned int CELL_EIGHT_SURROUNDING_DISPLAY = 8;
+static const unsigned int CELL_ZERO_SURROUNDING_DISPLAY = 10;
+static const unsigned int CELL_ONE_SURROUNDING_DISPLAY = 11;
+static const unsigned int CELL_TWO_SURROUNDING_DISPLAY = 12;
+static const unsigned int CELL_THREE_SURROUNDING_DISPLAY = 13;
+static const unsigned int CELL_FOUR_SURROUNDING_DISPLAY = 14;
+static const unsigned int CELL_FIVE_SURROUNDING_DISPLAY = 15;
+static const unsigned int CELL_SIX_SURROUNDING_DISPLAY = 16;
+static const unsigned int CELL_SEVEN_SURROUNDING_DISPLAY = 17;
+static const unsigned int CELL_EIGHT_SURROUNDING_DISPLAY = 18;
 
-#define CELL_FG_COLOR_ONE_SURROUNDING (10)
-#define CELL_FG_COLOR_TWO_SURROUNDING (11)
-#define CELL_FG_COLOR_THREE_SURROUNDING (12)
-#define CELL_FG_COLOR_FOUR_SURROUNDING (13)
-#define CELL_FG_COLOR_FIVE_SURROUNDING (14)
-#define CELL_FG_COLOR_SIX_SURROUNDING (15)
-#define CELL_FG_COLOR_SEVEN_SURROUNDING (16)
-#define CELL_FG_COLOR_EIGHT_SURROUNDING (17)
+static const unsigned int CELL_COLOR_ZERO_SURROUNDING = 10;
+static const unsigned int CELL_COLOR_ONE_SURROUNDING = 11;
+static const unsigned int CELL_COLOR_TWO_SURROUNDING = 12;
+static const unsigned int CELL_COLOR_THREE_SURROUNDING = 13;
+static const unsigned int CELL_COLOR_FOUR_SURROUNDING = 14;
+static const unsigned int CELL_COLOR_FIVE_SURROUNDING = 15;
+static const unsigned int CELL_COLOR_SIX_SURROUNDING = 16;
+static const unsigned int CELL_COLOR_SEVEN_SURROUNDING = 17;
+static const unsigned int CELL_COLOR_EIGHT_SURROUNDING = 18;
+
+static const unsigned int CELL_COLOR_SELECTED_COVERED = 20;
+static const unsigned int CELL_COLOR_SELECTED_UNCOVERED = 21;
+static const unsigned int CELL_COLOR_COVERED = 22;
+static const unsigned int CELL_COLOR_FLAGGED = 23;
+static const unsigned int CELL_COLOR_UNCOVERED = 24;
+static const unsigned int CELL_COLOR_HASBOMB = 25;
+static const unsigned int CELL_COLOR_BACKTRACKED = 26;
 
 static const unsigned int CELL_STR_LEN = 3;
 #define CELL_UNCOVERED_STR " %c "
+#define CELL_SELECTED_STR " %c "
 #ifndef DEBUG
 #define CELL_COVERED_STR "   "
-#define CELL_SELECTED_STR "   "
 #define CELL_FLAGGED_STR " \u2691 "
 #define CELL_HASBOMB_STR " \U0001F4A3 "
 #else
 #define CELL_COVERED_STR "[C]"
-#define CELL_SELECTED_STR "[S]"
 #define CELL_FLAGGED_STR "[F]"
 #define CELL_HASBOMB_STR "[B]"
 #endif
@@ -131,10 +141,10 @@ typedef enum {
   STR2INT_EMPTY,
 } str2int_errno;
 
-#define PRINT_CELL_WITH_COLOR(win, color, prints)                                                                      \
-  wattron(win, COLOR_PAIR(color));                                                                                     \
+#define CELL_PRINT_WITH_ATTRS(win, attrs, prints)                                                                      \
+  wattron(win, attrs);                                                                                                 \
   prints;                                                                                                              \
-  wattroff(win, COLOR_PAIR(color))
+  wattroff(win, attrs)
 
 // #define CELL_COVERED  "\x1B[47m" _COVERED "\x1B[0m"
 // #define CELL_SELECTED "\x1B[42m" _SELECTED "\x1B[0m"
@@ -308,7 +318,7 @@ static inline unsigned int _index_upright(GameBoard_T *board, unsigned int index
 
 #define UNCOVER_BLOCK_CONDITION(board, index) (!CELL_NUMBOMBS(board, index) && !CELL_UNCOVERED(board, index))
 #define PLACE_BOMB_CONDITION(board, index)                                                                             \
-  (index != board->curr_index || CELL_HASBOMB(board, index) || CELL_IS_ADJACENT(board, board->curr_index, index))
+  (index != board->curr_index && !CELL_HASBOMB(board, index) && !CELL_IS_ADJACENT(board, board->curr_index, index))
 
 /* Explode sequence */
 #define EXPLODE_SCENE_WIDTH 54
